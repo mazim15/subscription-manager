@@ -69,14 +69,19 @@ export default function AccountList({ refresh }: AccountListProps) {
               </div>
             ))}
           </div>
-          <button
-            onClick={() => handleDeleteAccount(account.id)} // Use the new handler
-            className="bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600 mt-4"
-          >
-            Delete Account
-          </button>
+          <div className="flex justify-center mt-4 space-x-4">
+            <button
+              onClick={() => handleDeleteAccount(account.id)} // Use the new handler
+              className="bg-red-500 text-white py-2 px-4 rounded hover:bg-red-600"
+            >
+              Delete Account
+            </button>
+            <NetflixLoginComponent email={account.email} />
+          </div>
         </div>
       ))}
     </div>
   );
 }
+
+import NetflixLoginComponent from './NetflixLogin';

@@ -2,6 +2,12 @@
 import { useState } from 'react';
 import AccountForm from '@/components/AccountForm';
 import AccountList from '@/components/AccountList';
+import dynamic from 'next/dynamic';
+
+const NetflixLogin = dynamic(() => import('@/components/NetflixLogin'), {
+  ssr: false,
+  loading: () => <p>Loading...</p>
+});
 
 export default function AccountsPage() {
   const [showForm, setShowForm] = useState(false);

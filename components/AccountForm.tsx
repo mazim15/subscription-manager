@@ -1,98 +1,91 @@
 'use client';
+
 import { useState } from 'react';
-import { addAccount } from '@/lib/db-operations';
-
-
 
 interface AccountFormProps {
-  onSuccess?: () => void;
+  onSuccess: () => void;
 }
 
 export default function AccountForm({ onSuccess }: AccountFormProps) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [slots, setSlots] = useState(
-    Array(5).fill({ pin: '', isOccupied: false })
-  );
+  const [formData, setFormData] = useState({
+    email: '',
+    password: '',
+  });
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+    setLoading(true);
+    setError(null);
+
     try {
-      await addAccount({
-        email,
-        password,
-        slots: slots.map((slot, index) => ({
-          id: `slot-${index + 1}`,
-          ...slot
-        })),
+      const response = await fetch('/api/accounts', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(formData),
       });
-      
-      setEmail('');
-      setPassword('');
-      setSlots(Array(5).fill({ pin: '', isOccupied: false }));
-      onSuccess?.();
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to create account');
+      }
+
+      setFormData({ email: '', password: '' });
+      onSuccess();
     } catch (error) {
-      console.error('Error adding account:', error);
+      setError(error instanceof Error ? error.message : 'An error occurred');
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="bg-white p-6 rounded-lg shadow mb-6">
-      <div className="space-y-4">
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            required
-          />
-        </div>
-        
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            required
-          />
-        </div>
-        
-        <div>
-          <h3 className="text-sm font-medium text-gray-700 mb-2">Slots</h3>
-          <div className="space-y-2">
-            {slots.map((slot, index) => (
-              <div key={index}>
-                <label className="block text-sm text-gray-500">Slot {index + 1} PIN</label>
-                <input
-                  type="text"
-                  value={slot.pin}
-                  onChange={(e) => {
-                    const newSlots = [...slots];
-                    newSlots[index] = { ...slot, pin: e.target.value };
-                    setSlots(newSlots);
-                  }}
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                  required
-                />
-              </div>
-            ))}
-          </div>
-        </div>
+    <form onSubmit={handleSubmit} className="space-y-4 mb-6">
+      <div>
+        <label htmlFor="email" className="block text-sm font-medium mb-1">
+          Email
+        </label>
+        <input
+          type="email"
+          id="email"
+          value={formData.email}
+          onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+          className="w-full px-3 py-2 border rounded-md"
+          required
+        />
       </div>
-      
-      <div className="mt-6">
-        <button
-          type="submit"
-          className="w-full bg-blue-500 text-white py-2 px-4 rounded hover:bg-blue-600"
-        >
-          Add Account
-        </button>
+
+      <div>
+        <label htmlFor="password" className="block text-sm font-medium mb-1">
+          Password
+        </label>
+        <input
+          type="password"
+          id="password"
+          value={formData.password}
+          onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+          className="w-full px-3 py-2 border rounded-md"
+          required
+        />
       </div>
+
+      {error && (
+        <p className="text-red-500 text-sm">{error}</p>
+      )}
+
+      <button
+        type="submit"
+        disabled={loading}
+        className={`w-full py-2 px-4 rounded-md text-white ${
+          loading ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'
+        }`}
+      >
+        {loading ? 'Creating...' : 'Create Account'}
+      </button>
     </form>
   );
 }
