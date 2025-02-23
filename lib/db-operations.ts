@@ -18,8 +18,11 @@ export const addAccount = async (account: Omit<Account, 'id' | 'createdAt' | 'up
   if (!auth?.currentUser) {
     throw new Error('User not authenticated');
   }
+
   const docRef = await addDoc(collection(db, 'accounts'), {
-    ...account,
+    email: account.email,
+    password: account.password,
+    slots: account.slots,
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   });

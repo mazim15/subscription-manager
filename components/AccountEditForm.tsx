@@ -1,20 +1,27 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
-interface AccountFormProps {
+interface AccountEditFormProps {
+  account: {
+    id: string;
+    email: string;
+    password: string;
+    slots: { id: string; pin: string; isOccupied: boolean }[];
+  };
   onSuccess: () => void;
+  onCancel: () => void;
 }
 
-export default function AccountForm({ onSuccess }: AccountFormProps) {
+export default function AccountEditForm({ account, onSuccess, onCancel }: AccountEditFormProps) {
   const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    pin1: '',
-    pin2: '',
-    pin3: '',
-    pin4: '',
-    pin5: '',
+    email: account.email,
+    password: account.password,
+    pin1: account.slots[0].pin,
+    pin2: account.slots[1].pin,
+    pin3: account.slots[2].pin,
+    pin4: account.slots[3].pin,
+    pin5: account.slots[4].pin,
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -25,33 +32,36 @@ export default function AccountForm({ onSuccess }: AccountFormProps) {
     setError(null);
 
     const slots = [
-      { id: 'slot-1', isOccupied: false, pin: formData.pin1 },
-      { id: 'slot-2', isOccupied: false, pin: formData.pin2 },
-      { id: 'slot-3', isOccupied: false, pin: formData.pin3 },
-      { id: 'slot-4', isOccupied: false, pin: formData.pin4 },
-      { id: 'slot-5', isOccupied: false, pin: formData.pin5 },
+      { id: 'slot-1', isOccupied: Boolean(account.slots[0].isOccupied), pin: formData.pin1 },
+      { id: 'slot-2', isOccupied: Boolean(account.slots[1].isOccupied), pin: formData.pin2 },
+      { id: 'slot-3', isOccupied: Boolean(account.slots[2].isOccupied), pin: formData.pin3 },
+      { id: 'slot-4', isOccupied: Boolean(account.slots[3].isOccupied), pin: formData.pin4 },
+      { id: 'slot-5', isOccupied: Boolean(account.slots[4].isOccupied), pin: formData.pin5 },
     ];
 
     try {
-      const response = await fetch('/api/accounts', {
-        method: 'POST',
+      const requestBody = JSON.stringify({
+        email: formData.email,
+        password: formData.password,
+        slots: slots,
+      });
+
+      console.log('Request Body:', requestBody);
+
+      const response = await fetch(`/api/accounts/${account.id}`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          slots: slots,
-        }),
+        body: requestBody,
       });
 
-      const data = await response.json();
+      const data = await response.json().then(data => data);
 
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to create account');
+        throw new Error(data.error || 'Failed to update account');
       }
 
-      setFormData({ email: '', password: '', pin1: '', pin2: '', pin3: '', pin4: '', pin5: '' });
       onSuccess();
     } catch (error) {
       setError(error instanceof Error ? error.message : 'An error occurred');
@@ -164,15 +174,24 @@ export default function AccountForm({ onSuccess }: AccountFormProps) {
         <p className="text-red-500 text-sm">{error}</p>
       )}
 
-      <button
-        type="submit"
-        disabled={loading}
-        className={`w-full py-2 px-4 rounded-md text-white ${
-          loading ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'
-        }`}
-      >
-        {loading ? 'Creating...' : 'Create Account'}
-      </button>
+      <div className="flex justify-between">
+        <button
+          type="submit"
+          disabled={loading}
+          className={`w-1/2 py-2 px-4 rounded-md text-white ${
+            loading ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'
+          }`}
+        >
+          {loading ? 'Updating...' : 'Update Account'}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="w-1/2 py-2 px-4 rounded-md text-gray-700 bg-gray-200 hover:bg-gray-300"
+        >
+          Cancel
+        </button>
+      </div>
     </form>
   );
 }

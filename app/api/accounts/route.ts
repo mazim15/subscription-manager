@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
+import { collection, doc, addDoc, updateDoc, getDocs, query, orderBy, Timestamp } from 'firebase/firestore';
 
 export async function GET() {
   try {
@@ -33,6 +33,7 @@ export async function POST(request: Request) {
     const docRef = await addDoc(collection(db, 'accounts'), {
       email: data.email,
       password: data.password,
+      slots: data.slots,
       createdAt: now,
       updatedAt: now
     });
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
       id: docRef.id,
       email: data.email,
       password: data.password,
+      slots: data.slots,
       createdAt: now.toDate(),
       updatedAt: now.toDate()
     });
