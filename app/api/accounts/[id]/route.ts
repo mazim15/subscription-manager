@@ -6,7 +6,7 @@ export async function PUT(request: Request, { params }: { params: { id: string }
   try {
     const data = await request.json();
     const { email, password, slots } = data;
-    const accountId = params.id;
+    const accountId = (await params).id;
     const accountRef = doc(db, 'accounts', accountId);
     const now = Timestamp.now();
 

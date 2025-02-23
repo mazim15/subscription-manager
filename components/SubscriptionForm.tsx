@@ -1,8 +1,9 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { createSubscription, getAccounts, getSubscribers } from '@/lib/db-operations';
-
 import { Account, Subscriber } from '@/types';
+
+const SUBSCRIPTION_DAYS = 27;
 
 export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -139,7 +140,14 @@ export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void
           <input
             type="date"
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={(e) => {
+              setStartDate(e.target.value);
+              const newStartDate = new Date(e.target.value);
+              const newEndDate = new Date(newStartDate.setDate(newStartDate.getDate() + SUBSCRIPTION_DAYS));
+              
+              const formattedEndDate = newEndDate.toISOString().split('T')[0];
+              setEndDate(formattedEndDate);
+            }}
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             required
           />
@@ -150,7 +158,7 @@ export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void
           <input
             type="date"
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            readOnly // Make the end date read-only
             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
             required
           />

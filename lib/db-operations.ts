@@ -347,3 +347,17 @@ export const deleteAccount = async (accountId: string) => {
   const accountRef = doc(db, 'accounts', accountId);
   await deleteDoc(accountRef);
 };
+
+export const updateSubscription = async (subscriptionId: string, startDate: Date, endDate: Date, paidPrice: number) => {
+  if (!auth?.currentUser) {
+    throw new Error('User not authenticated');
+  }
+
+  const subscriptionRef = doc(db, 'subscriptions', subscriptionId);
+  await updateDoc(subscriptionRef, {
+    startDate: Timestamp.fromDate(startDate),
+    endDate: Timestamp.fromDate(endDate),
+    paidPrice: paidPrice,
+    updatedAt: Timestamp.now(),
+  });
+};

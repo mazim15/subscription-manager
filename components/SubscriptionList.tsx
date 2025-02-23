@@ -1,7 +1,6 @@
-
 'use client';
 import { useState, useEffect } from 'react';
-import { getSubscriptions, getAccounts, getSubscribers, cancelSubscription, createSubscription, deleteSubscription } from '@/lib/db-operations';
+import { getSubscriptions, getAccounts, getSubscribers, cancelSubscription, createSubscription, deleteSubscription, updateSubscription } from '@/lib/db-operations';
 import { Timestamp } from 'firebase/firestore';
 
 interface ExtendedSubscription {
@@ -21,6 +20,7 @@ interface ExtendedSubscription {
 export type { ExtendedSubscription };
 
 import RenewSubscriptionForm from './RenewSubscriptionForm';
+import SubscriptionEditForm from './SubscriptionEditForm';
 
 interface RenewSubscriptionFormProps {
     subscription: ExtendedSubscription;
@@ -34,6 +34,7 @@ export default function SubscriptionList() {
     const [filter, setFilter] = useState('all'); // 'all' | 'active' | 'expired'
     const [currency, setCurrency] = useState('PKR'); // 'USD' | 'PKR'
     const [showRenewForm, setShowRenewForm] = useState(false);
+    const [showEditForm, setShowEditForm] = useState(false);
     const [selectedSubscription, setSelectedSubscription] = useState<ExtendedSubscription | null>(null);
 
   useEffect(() => {
@@ -59,7 +60,7 @@ export default function SubscriptionList() {
             slotNumber: slotIndex !== undefined ? `Slot ${slotIndex + 1}` : 'Unknown Slot',
             startDate: sub.startDate,
             endDate: sub.endDate,
-            paidPrice: sub.paidPrice, // Add this line
+            paidPrice: sub.paidPrice,
           };
         });
 
@@ -104,6 +105,52 @@ export default function SubscriptionList() {
         setShowRenewForm(true);
     };
 
+    const handleEditClick = (subscription: ExtendedSubscription) => {
+        setSelectedSubscription(subscription);
+        setShowEditForm(true);
+    };
+
+    const handleUpdate = async (id: string, startDate: Date, endDate: Date, paidPrice: number) => {
+        if (!selectedSubscription) return;
+
+        try {
+            await updateSubscription(id, startDate, endDate, paidPrice);
+            setShowEditForm(false);
+
+            // Refresh subscriptions
+            const subsData = await getSubscriptions();
+            const accountsData = await getAccounts();
+            const subscribersData = await getSubscribers();
+
+            // Enhance subscription data with related information
+            const enhancedSubscriptions = subsData.map(sub => {
+                const account = accountsData.find(acc => acc.id === sub.accountId);
+                const subscriber = subscribersData.find(s => s.id === sub.subscriberId);
+                const slot = account?.slots.find(s => s.id === sub.slotId);
+                const slotIndex = account?.slots.findIndex(s => s.id === sub.slotId);
+
+                return {
+                    ...sub,
+                    accountEmail: account?.email || 'Unknown Account',
+                    subscriberName: subscriber?.name || 'Unknown Subscriber',
+                    slotNumber: slotIndex !== undefined ? `Slot ${slotIndex + 1}` : 'Unknown Slot',
+                    startDate: sub.startDate,
+                    endDate: sub.endDate,
+                    paidPrice: sub.paidPrice,
+                };
+            });
+
+            setSubscriptions(enhancedSubscriptions);
+        } catch (error) {
+            console.error('Error updating subscription:', error);
+        }
+    };
+
+    const handleCancelEdit = () => {
+        setShowEditForm(false);
+        setSelectedSubscription(null);
+    };
+
     const handleRenew = async (startDate: Date, endDate: Date, accountId: string, subscriberId: string, slotId: string) => {
         if (!selectedSubscription) return;
 
@@ -137,6 +184,7 @@ export default function SubscriptionList() {
                     slotNumber: slotIndex !== undefined ? `Slot ${slotIndex + 1}` : 'Unknown Slot',
                     startDate: sub.startDate,
                     endDate: sub.endDate,
+                    paidPrice: sub.paidPrice,
                 };
             });
 
@@ -235,11 +283,11 @@ export default function SubscriptionList() {
                     End: {formatDate(subscription.endDate)}
                   </div>
                 </td>
-<td className="px-6 py-4 whitespace-nowrap">
-  <div className="text-sm text-gray-900">
-    {typeof subscription.paidPrice === 'number' ? `PKR ${subscription.paidPrice.toFixed(2)}` : 'N/A'}
-  </div>
-</td>
+                <td className="px-6 py-4 whitespace-nowrap">
+                  <div className="text-sm text-gray-900">
+                    {typeof subscription.paidPrice === 'number' ? `PKR ${subscription.paidPrice.toFixed(2)}` : 'N/A'}
+                  </div>
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(subscription.status)}`}>
                     {subscription.status.charAt(0).toUpperCase() + subscription.status.slice(1)}
@@ -251,6 +299,12 @@ export default function SubscriptionList() {
                     onClick={() => handleRenewClick(subscription)}
                   >
                     Renew
+                  </button>
+                  <button
+                    className="text-blue-600 hover:text-blue-900 mr-3"
+                    onClick={() => handleEditClick(subscription)}
+                  >
+                    Edit
                   </button>
                   <button
                     className="text-red-600 hover:text-red-900"
@@ -295,6 +349,14 @@ export default function SubscriptionList() {
           subscription={selectedSubscription}
           onRenew={handleRenew}
           onCancel={handleCancelRenew}
+        />
+      )}
+
+      {showEditForm && selectedSubscription && (
+        <SubscriptionEditForm
+          subscription={selectedSubscription}
+          onUpdate={handleUpdate}
+          onCancel={handleCancelEdit}
         />
       )}
     </div>
