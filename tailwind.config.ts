@@ -11,8 +11,15 @@ export default {
       colors: {
         background: "var(--background)",
         foreground: "var(--foreground)",
+        headingText: "var(--heading-text)",
+        sidebar: "var(--sidebar)",
+        sidebarHover: "var(--sidebar-hover)",
+        cardBackground: "var(--card-background)",
+        primary: "var(--primary)",
+        primaryHover: "var(--primary-hover)",
       },
     },
   },
   plugins: [],
+  darkMode: 'media',
 } satisfies Config;

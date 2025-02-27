@@ -4,8 +4,10 @@ import { Subscription } from '@/types';
 import { getSubscriptions, getAccounts, getSubscribers, createSubscription } from '@/lib/db-operations';
 import { useState, useEffect } from 'react';
 import { Timestamp } from 'firebase/firestore';
+import { generateText } from '@/lib/gemini';
+import MarkdownRenderer from '@/components/MarkdownRenderer';
 
-interface ExtendedSubscription {
+export interface ExtendedSubscription {
   id: string;
   accountId: string;
   slotId: string;
@@ -13,7 +15,8 @@ interface ExtendedSubscription {
   startDate: Date | Timestamp;
   endDate: Date | Timestamp;
   paidPrice: number;
-  status: 'active' | 'expired' | 'pending-renewal';
+  status: 'active' | 'expired' | 'pending-renewal' | 'suspended';
+  paymentStatus?: string;
   accountEmail?: string;
   subscriberName?: string;
   slotNumber?: string;
@@ -26,6 +29,8 @@ export default function ExpiringSubscriptions({ subscriptions }: { subscriptions
     const [loading, setLoading] = useState(true);
     const [showRenewForm, setShowRenewForm] = useState(false);
     const [selectedSubscription, setSelectedSubscription] = useState<ExtendedSubscription | null>(null);
+    const [renewalStrategy, setRenewalStrategy] = useState('');
+    const [strategyLoading, setStrategyLoading] = useState(false);
 
     useEffect(() => {
         const fetchData = async () => {
@@ -94,10 +99,12 @@ export default function ExpiringSubscriptions({ subscriptions }: { subscriptions
                 accountId: accountId,
                 slotId: slotId,
                 subscriberId: subscriberId,
-                paidPrice: selectedSubscription.paidPrice || 0,
+                paidPrice: 0,
                 startDate: startDate,
                 endDate: endDate,
                 status: 'active',
+                paymentStatus: 'unpaid',
+                paymentDueDate: Timestamp.fromDate(startDate),
             });
             setShowRenewForm(false);
             // Refresh subscriptions
@@ -133,6 +140,56 @@ export default function ExpiringSubscriptions({ subscriptions }: { subscriptions
         setSelectedSubscription(null);
     };
 
+    const generateRenewalStrategy = async () => {
+        if (enhancedSubscriptions.length === 0) return;
+        
+        try {
+            setStrategyLoading(true);
+            
+            const expiringData = enhancedSubscriptions.map(sub => ({
+                subscriberName: sub.subscriberName || 'Unknown',
+                accountEmail: sub.accountEmail || 'Unknown',
+                endDate: sub.endDate instanceof Timestamp 
+                    ? sub.endDate.toDate().toLocaleDateString() 
+                    : new Date(sub.endDate).toLocaleDateString(),
+                paidPrice: sub.paidPrice || 0
+            }));
+            
+            const prompt = `
+                As a subscription retention specialist, analyze these expiring subscriptions:
+                ${JSON.stringify(expiringData, null, 2)}
+                
+                Provide a strategic approach to maximize renewals, including:
+                1. Prioritization strategy (which subscribers to focus on first)
+                2. Recommended renewal incentives
+                3. Timing for renewal outreach
+                4. Communication approach
+                
+                Format your response using proper markdown:
+                - Use ### for section headings (e.g., ### Prioritization Strategy)
+                - Use bullet points with * for lists
+                - Use **bold** for emphasis
+                - Use > for important notes or quotes
+                
+                Keep it practical and actionable (under 200 words).
+            `;
+            
+            const result = await generateText(prompt);
+            setRenewalStrategy(result);
+        } catch (error) {
+            console.error('Error generating renewal strategy:', error);
+            setRenewalStrategy('Unable to generate renewal strategy at this time.');
+        } finally {
+            setStrategyLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        if (enhancedSubscriptions.length > 0 && !loading) {
+            generateRenewalStrategy();
+        }
+    }, [enhancedSubscriptions, loading]);
+
     if (loading) {
         return (
             <div className="flex justify-center items-center h-64">
@@ -142,8 +199,29 @@ export default function ExpiringSubscriptions({ subscriptions }: { subscriptions
     }
 
     return (
-        <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-xl font-semibold mb-4">Expiring Subscriptions</h2>
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow p-6">
+            <h2 className="text-xl font-semibold mb-4 heading">Expiring Subscriptions</h2>
+            {enhancedSubscriptions.length > 0 && (
+                <div className="mb-6 p-4 bg-amber-50 dark:bg-amber-900/30 rounded-lg border border-amber-100 dark:border-amber-800">
+                    <div className="flex justify-between items-center mb-2">
+                        <h4 className="text-sm font-medium text-amber-800 dark:text-amber-300">AI Renewal Strategy</h4>
+                        <button 
+                            onClick={generateRenewalStrategy}
+                            disabled={strategyLoading}
+                            className="text-xs text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-300"
+                        >
+                            {strategyLoading ? 'Generating...' : 'Refresh Strategy'}
+                        </button>
+                    </div>
+                    <div className="text-sm text-gray-800 dark:text-gray-200">
+                        {strategyLoading ? (
+                            <p className="text-gray-500 dark:text-gray-400">Generating renewal strategy...</p>
+                        ) : (
+                            <MarkdownRenderer content={renewalStrategy} />
+                        )}
+                    </div>
+                </div>
+            )}
             <div className="space-y-4">
                 {enhancedSubscriptions.map((sub) => (
                     <div key={sub.id} className="border-b pb-4">
@@ -166,7 +244,7 @@ export default function ExpiringSubscriptions({ subscriptions }: { subscriptions
             </div>
             {showRenewForm && selectedSubscription && (
                 <RenewSubscriptionForm
-                    subscription={selectedSubscription}
+                    subscription={selectedSubscription as any}
                     onRenew={handleRenew}
                     onCancel={handleCancelRenew}
                 />

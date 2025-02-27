@@ -81,7 +81,7 @@ export default function AccountEditForm({ account, onSuccess, onCancel }: Accoun
           id="email"
           value={formData.email}
           onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-          className="w-full px-3 py-2 border rounded-md"
+          className="w-full px-3 py-2 border rounded-md text-black"
           required
         />
       </div>
@@ -95,7 +95,7 @@ export default function AccountEditForm({ account, onSuccess, onCancel }: Accoun
           id="password"
           value={formData.password}
           onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
-          className="w-full px-3 py-2 border rounded-md"
+          className="w-full px-3 py-2 border rounded-md text-black"
           required
         />
       </div>
@@ -109,7 +109,7 @@ export default function AccountEditForm({ account, onSuccess, onCancel }: Accoun
           id="pin1"
           value={formData.pin1}
           onChange={(e) => setFormData(prev => ({ ...prev, pin1: e.target.value }))}
-          className="w-full px-3 py-2 border rounded-md"
+          className="w-full px-3 py-2 border rounded-md text-black"
           required
         />
       </div>
@@ -123,7 +123,7 @@ export default function AccountEditForm({ account, onSuccess, onCancel }: Accoun
           id="pin2"
           value={formData.pin2}
           onChange={(e) => setFormData(prev => ({ ...prev, pin2: e.target.value }))}
-          className="w-full px-3 py-2 border rounded-md"
+          className="w-full px-3 py-2 border rounded-md text-black"
           required
         />
       </div>
@@ -137,7 +137,7 @@ export default function AccountEditForm({ account, onSuccess, onCancel }: Accoun
           id="pin3"
           value={formData.pin3}
           onChange={(e) => setFormData(prev => ({ ...prev, pin3: e.target.value }))}
-          className="w-full px-3 py-2 border rounded-md"
+          className="w-full px-3 py-2 border rounded-md text-black"
           required
         />
       </div>
@@ -151,7 +151,7 @@ export default function AccountEditForm({ account, onSuccess, onCancel }: Accoun
           id="pin4"
           value={formData.pin4}
           onChange={(e) => setFormData(prev => ({ ...prev, pin4: e.target.value }))}
-          className="w-full px-3 py-2 border rounded-md"
+          className="w-full px-3 py-2 border rounded-md text-black"
           required
         />
       </div>
@@ -165,7 +165,7 @@ export default function AccountEditForm({ account, onSuccess, onCancel }: Accoun
           id="pin5"
           value={formData.pin5}
           onChange={(e) => setFormData(prev => ({ ...prev, pin5: e.target.value }))}
-          className="w-full px-3 py-2 border rounded-md"
+          className="w-full px-3 py-2 border rounded-md text-black"
           required
         />
       </div>
