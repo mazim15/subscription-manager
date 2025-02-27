@@ -10,6 +10,15 @@ interface SubscriberPaymentHistoryProps {
   subscriberName: string;
 }
 
+interface Subscription {
+  id: string;
+  startDate: string;
+  endDate: string;
+  paymentDueDate: string;
+  paidPrice: number;
+  paymentStatus: 'paid' | 'unpaid' | 'partial' | 'unknown';
+}
+
 export default function SubscriberPaymentHistory({ subscriberId, subscriberName }: SubscriberPaymentHistoryProps) {
   const [paymentHistory, setPaymentHistory] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -23,7 +32,11 @@ export default function SubscriberPaymentHistory({ subscriberId, subscriberName 
     const fetchPaymentHistory = async () => {
       try {
         setLoading(true);
-        const subscriptions = await getSubscriptionsBySubscriberId(subscriberId);
+        const rawSubscriptions = await getSubscriptionsBySubscriberId(subscriberId);
+        const subscriptions = rawSubscriptions.map(sub => ({
+          ...sub,
+          paymentStatus: sub.paidPrice > 0 ? 'paid' : 'unpaid'
+        })) as Subscription[];
         
         if (!Array.isArray(subscriptions)) {
           throw new Error("Failed to retrieve subscription data");

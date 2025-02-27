@@ -16,10 +16,11 @@ import {
 import { auth } from '../firebase';
 import { Subscription, Slot } from '../../types';
 
-interface SubscriptionInput extends Omit<Subscription, 'id' | 'createdAt' | 'updatedAt' | 'startDate' | 'endDate' | 'paidPrice' | 'paymentStatus'> {
+interface SubscriptionInput extends Omit<Subscription, 'id' | 'createdAt' | 'updatedAt' | 'startDate' | 'endDate' | 'paidPrice' | 'accountPrice' | 'paymentStatus'> {
     startDate: Date;
     endDate: Date;
     paidPrice: number;
+    accountPrice: number;
     paymentStatus: 'paid' | 'unpaid' | 'overdue' | 'pending' | 'partial';
 }
 
@@ -35,8 +36,9 @@ export const createSubscription = async (subscription: SubscriptionInput) => {
 
     const { startDate, endDate, paymentStatus, paymentDueDate, ...rest } = subscription;
 
-    if (typeof rest.paidPrice !== 'number' || isNaN(rest.paidPrice)) {
-        throw new Error('Paid price must be a valid number.');
+    if (typeof rest.paidPrice !== 'number' || isNaN(rest.paidPrice) || 
+        typeof rest.accountPrice !== 'number' || isNaN(rest.accountPrice)) {
+        throw new Error('Paid price and account price must be valid numbers.');
     }
 
     // Set payment due date to the start date by default if not provided
@@ -47,7 +49,7 @@ export const createSubscription = async (subscription: SubscriptionInput) => {
     
     console.log("Creating subscription with due date:", dueDateAsDate);
 
-    // Add subscription
+    // Add subscription with the new accountPrice field
     const docRef = await addDoc(collection(db, 'subscriptions'), {
         ...rest,
         startDate: Timestamp.fromDate(startDate),
@@ -123,9 +125,10 @@ export const getSubscriptions = async () => {
       accountId: data.accountId,
       subscriberId: data.subscriberId,
       slotId: data.slotId,
-      startDate: data.startDate.toDate(), // Convert to Date
-      endDate: data.endDate.toDate(), // Convert to Date
-      paidPrice: data.paidPrice,
+      startDate: data.startDate.toDate(),
+      endDate: data.endDate.toDate(),
+      paidPrice: data.paidPrice || 0,
+      accountPrice: data.accountPrice || 0,
       status: data.status,
       paymentStatus: data.paymentStatus,
       notes: data.notes,
@@ -326,7 +329,6 @@ export const updateSubscription = async (
 
 export const getPaymentReminders = async () => {
   const now = new Date();
-  console.log("Current date:", now);
   
   // Get subscriptions where payment is due within 7 days
   const upcomingDueQuery = query(
@@ -348,21 +350,30 @@ export const getPaymentReminders = async () => {
     getDocs(overdueQuery)
   ]);
   
-  console.log("Upcoming payments count:", upcomingSnapshot.docs.length);
-  console.log("Overdue payments count:", overdueSnapshot.docs.length);
+  const upcomingPayments = upcomingSnapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      accountPrice: data.accountPrice || 0,
+      paidPrice: data.paidPrice || 0,
+      paymentDueDate: data.paymentDueDate,
+      reminderType: 'upcoming'
+    };
+  });
   
-  const upcomingPayments = upcomingSnapshot.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data(),
-    reminderType: 'upcoming'
-  }));
-  
-  const overduePayments = overdueSnapshot.docs.map(doc => ({
-    id: doc.id,
-    ...doc.data(),
-    reminderType: 'overdue',
-    daysOverdue: Math.floor((now.getTime() - doc.data().paymentDueDate.toDate().getTime()) / (24 * 60 * 60 * 1000))
-  }));
+  const overduePayments = overdueSnapshot.docs.map(doc => {
+    const data = doc.data();
+    return {
+      id: doc.id,
+      ...data,
+      accountPrice: data.accountPrice || 0,
+      paidPrice: data.paidPrice || 0,
+      paymentDueDate: data.paymentDueDate,
+      reminderType: 'overdue',
+      daysOverdue: Math.floor((now.getTime() - data.paymentDueDate.toDate().getTime()) / (24 * 60 * 60 * 1000))
+    };
+  });
   
   return [...upcomingPayments, ...overduePayments];
 };

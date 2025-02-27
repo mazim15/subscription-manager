@@ -18,8 +18,9 @@ interface ExtendedSubscription {
   startDate: Date | Timestamp;
   endDate: Date | Timestamp;
   paidPrice: number;
+  accountPrice: number;
   status: 'active' | 'expired' | 'pending-renewal' | 'suspended';
-  paymentStatus: 'paid' | 'unpaid' | 'overdue' | 'pending' | 'partial';
+  paymentStatus: 'paid' | 'unpaid' | 'overdue' | 'pending' | 'partial' | 'free';
   accountEmail?: string;
   subscriberName?: string;
   slotNumber?: string;
@@ -82,6 +83,7 @@ export default function SubscriptionList() {
             endDate: sub.endDate,
             paidPrice: sub.paidPrice,
             paymentStatus: sub.paymentStatus,
+            accountPrice: sub.accountPrice || 0,
           };
         });
 
@@ -183,6 +185,7 @@ export default function SubscriptionList() {
                 status: 'active',
                 paymentStatus: 'unpaid',
                 paymentDueDate: Timestamp.fromDate(startDate),
+                accountPrice: selectedSubscription.accountPrice || 0,
             });
             setShowRenewForm(false);
             // Refresh subscriptions
@@ -206,6 +209,7 @@ export default function SubscriptionList() {
                     endDate: sub.endDate,
                     paidPrice: sub.paidPrice,
                     paymentStatus: sub.paymentStatus,
+                    accountPrice: sub.accountPrice || 0,
                 };
             });
 
@@ -583,10 +587,13 @@ export default function SubscriptionList() {
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                 Dates
               </th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                Price
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                Account Price
               </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                Paid Price
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                 Status
               </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
@@ -648,10 +655,11 @@ export default function SubscriptionList() {
                     End: {formatDate(subscription.endDate)}
                   </div>
                 </td>
-                <td className="px-6 py-4 whitespace-nowrap">
-                  <div className="text-sm text-gray-900 dark:text-gray-100">
-                    {typeof subscription.paidPrice === 'number' ? `PKR ${subscription.paidPrice.toFixed(2)}` : 'N/A'}
-                  </div>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                  PKR {subscription.accountPrice?.toLocaleString() || '0'}
+                </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                  PKR {subscription.paidPrice?.toLocaleString() || '0'}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap">
                   <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(subscription.status)}`}>

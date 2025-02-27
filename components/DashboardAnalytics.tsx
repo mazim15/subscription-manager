@@ -21,7 +21,7 @@ interface ExtendedSubscription {
   endDate: Date | Timestamp;
   paidPrice: number;
   status: 'active' | 'expired' | 'pending-renewal' | 'suspended';
-  paymentStatus: 'paid' | 'unpaid' | 'overdue' | 'pending' | 'partial';
+  paymentStatus: 'paid' | 'unpaid' | 'overdue' | 'pending' | 'partial' | 'free';
   accountEmail?: string;
   subscriberName?: string;
   slotNumber?: string;

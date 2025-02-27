@@ -6,6 +6,8 @@ export * from './db-operations/subscribers';
 export * from './db-operations/subscriptions';
 export * from './db-operations/payments';
 export * from './db-operations/usage';
+export { getSubscriptions } from './db-operations/subscriptions';
+export { getSubscriber } from './db-operations/subscribers';
 
 /**
  * Get all subscriptions for a specific subscriber
@@ -23,7 +25,9 @@ export const getSubscriptionsBySubscriberId = async (subscriberId: string) => {
         ...data,
         startDate: data.startDate instanceof Timestamp ? data.startDate.toDate() : data.startDate,
         endDate: data.endDate instanceof Timestamp ? data.endDate.toDate() : data.endDate,
-        paymentDueDate: data.paymentDueDate instanceof Timestamp ? data.paymentDueDate.toDate() : data.paymentDueDate
+        paymentDueDate: data.paymentDueDate instanceof Timestamp ? data.paymentDueDate.toDate() : data.paymentDueDate,
+        accountPrice: data.accountPrice || 0,
+        paidPrice: data.paidPrice || 0
       };
     });
   } catch (error) {

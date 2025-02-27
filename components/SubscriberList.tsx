@@ -1,8 +1,8 @@
 'use client';
 import Link from "next/link";
 import { useState, useEffect, useMemo } from 'react';
-import { getSubscribers, deleteSubscriber, getSubscriberUsage, getSubscriptionsBySubscriberId } from '@/lib/db-operations';
-import { Subscriber } from '@/types';
+import { getSubscribers, deleteSubscriber, getSubscriberUsage, getSubscriptionsBySubscriberId, getSubscriptions } from '@/lib/db-operations';
+import { Subscriber, SubscriberWithStats, Subscription } from '@/types';
 import { generateText } from '@/lib/gemini';
 import { notify } from '@/lib/notifications';
 
@@ -12,119 +12,70 @@ interface SubscriberListProps {
   onStatsUpdate?: () => void;
 }
 
-interface SubscriberWithScore extends Subscriber {
-  paymentScore: number;
-  totalDue: number;
-  totalPaid: number;
-  paymentRate: number;
-  activeSubscriptions: number;
-  totalPayments: number;
-}
-
 export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate }: SubscriberListProps) {
-  const [subscribers, setSubscribers] = useState<Subscriber[]>([]);
+  const [subscribers, setSubscribers] = useState<SubscriberWithStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null); // Add error state
   const [subscriberUsages, setSubscriberUsages] = useState<{[key: string]: any}>({});
   const [selectedSubscriberForAnalysis, setSelectedSubscriberForAnalysis] = useState<string | null>(null);
   const [subscriberAnalysis, setSubscriberAnalysis] = useState('');
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [subscribersWithScores, setSubscribersWithScores] = useState<SubscriberWithScore[]>([]);
   const [sortField, setSortField] = useState<string>('name');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
   const [scoreFilter, setScoreFilter] = useState<string>('all');
   const [selectedSubscribers, setSelectedSubscribers] = useState<string[]>([]);
 
-  const calculatePaymentScore = async (subscribers: Subscriber[]) => {
-    const enhancedSubscribers: SubscriberWithScore[] = [];
-    
-    for (const subscriber of subscribers) {
-      try {
-        // Get subscriber's subscriptions
-        const subscriptionHistory = await getSubscriptionsBySubscriberId(subscriber.id);
-        
-        // Default values if no subscription history
-        let paymentScore = 0;
-        let totalDue = 0;
-        let totalPaid = 0;
-        let paymentRate = 0;
-        let activeSubscriptions = 0;
-        
-        if (Array.isArray(subscriptionHistory) && subscriptionHistory.length > 0) {
-          // Calculate payment metrics
-          let paidCount = 0;
-          
-          subscriptionHistory.forEach(sub => {
-            const price = sub.paidPrice || 0;
-            totalDue += price;
-            
-            if (sub.paymentStatus === 'paid') {
-              totalPaid += price;
-              paidCount++;
-            }
-            
-            // Count active subscriptions
-            if (sub.status === 'active') {
-              activeSubscriptions++;
-            }
-          });
-          
-          // Calculate payment rate (percentage of subscriptions paid)
-          paymentRate = Math.round((paidCount / subscriptionHistory.length) * 100);
-          
-          // Calculate payment score (0-100)
-          // 70% weight to amount paid vs due, 30% weight to number of paid subscriptions
-          const amountRatio = totalDue > 0 ? (totalPaid / totalDue) : 0;
-          paymentScore = Math.round((amountRatio * 70) + (paymentRate * 0.3));
-          
-          // Cap score at 100
-          paymentScore = Math.min(100, paymentScore);
-        }
-        
-        enhancedSubscribers.push({
-          ...subscriber,
-          paymentScore,
-          totalDue,
-          totalPaid,
-          paymentRate,
-          activeSubscriptions,
-          totalPayments: totalPaid
-        });
-      } catch (error) {
-        console.error(`Error calculating payment score for ${subscriber.name}:`, error);
-        enhancedSubscribers.push({
-          ...subscriber,
-          paymentScore: 0,
-          totalDue: 0,
-          totalPaid: 0,
-          paymentRate: 0,
-          activeSubscriptions: 0,
-          totalPayments: 0
-        });
-      }
-    }
-    
-    return enhancedSubscribers;
-  };
-
   useEffect(() => {
     const fetchSubscribers = async () => {
       try {
         setLoading(true);
-        const data = (await getSubscribers()) as Subscriber[];
-        setSubscribers(data);
+        const [subscribersData, subscriptionsData] = await Promise.all([
+          getSubscribers(),
+          getSubscriptions()
+        ]);
 
-        // Calculate payment scores
-        const subscribersWithScores = await calculatePaymentScore(data);
-        setSubscribersWithScores(subscribersWithScores);
+        // Calculate stats for each subscriber
+        const subscribersWithStats = subscribersData.map(subscriber => {
+          const subscriberSubscriptions = subscriptionsData.filter(
+            sub => sub.subscriberId === subscriber.id
+          );
 
-        // Fetch subscriber usages
-        const usages: {[key: string]: any} = {};
-        for (const subscriber of data) {
-          const usage = await getSubscriberUsage(subscriber.id);
-          usages[subscriber.id] = usage;
-        }
-        setSubscriberUsages(usages);
+          const totalDue = subscriberSubscriptions.reduce(
+            (sum, sub) => sum + (sub.accountPrice || 0), 
+            0
+          );
+          
+          const totalPaid = subscriberSubscriptions.reduce(
+            (sum, sub) => sum + (sub.paidPrice || 0), 
+            0
+          );
+
+          const outstandingBalance = Math.max(0, totalDue - totalPaid);
+          
+          const activeSubscriptions = subscriberSubscriptions.filter(
+            sub => sub.status === 'active'
+          ).length;
+
+          // Calculate payment score
+          const paidCount = subscriberSubscriptions.filter(sub => sub.paymentStatus === 'paid').length;
+          const paymentRate = subscriberSubscriptions.length > 0 ? 
+            (paidCount / subscriberSubscriptions.length) * 100 : 0;
+          
+          const amountRatio = totalDue > 0 ? (totalPaid / totalDue) : 0;
+          const paymentScore = Math.min(100, Math.round((amountRatio * 70) + (paymentRate * 0.3)));
+
+          return {
+            ...subscriber,
+            totalDue,
+            totalPaid,
+            outstandingBalance,
+            subscriptionCount: subscriberSubscriptions.length,
+            activeSubscriptions,
+            paymentScore
+          };
+        });
+
+        setSubscribers(subscribersWithStats);
       } catch (error) {
         console.error('Error fetching subscribers:', error);
       } finally {
@@ -139,8 +90,23 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
     if (window.confirm('Are you sure you want to delete this subscriber?')) {
       try {
         await deleteSubscriber(subscriberId);
-        const data = await getSubscribers();
-        setSubscribers(data);
+        const subscribersData = await getSubscribers();
+        // Recalculate stats for the updated subscribers
+        const subscribersWithStats = await Promise.all(subscribersData.map(async (subscriber) => {
+          const subscriptions = await getSubscriptionsBySubscriberId(subscriber.id);
+          // Calculate stats similar to fetchSubscribers
+          // This is a simplified version - you might want to extract this logic into a separate function
+          return {
+            ...subscriber,
+            totalDue: 0,
+            totalPaid: 0,
+            outstandingBalance: 0,
+            subscriptionCount: 0,
+            activeSubscriptions: 0,
+            paymentScore: 0
+          };
+        }));
+        setSubscribers(subscribersWithStats);
         notify.success('Subscriber deleted successfully');
       } catch (error: any) {
         console.error('Error deleting subscriber:', error);
@@ -156,8 +122,51 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
 
   const handleSubscriberUpdated = async () => {
     setSelectedSubscriberForAnalysis(null);
-    const data = await getSubscribers();
-    setSubscribers(data);
+    const subscribersData = await getSubscribers();
+    const subscriptionsData = await getSubscriptions();
+    
+    // Calculate stats for each subscriber
+    const subscribersWithStats = subscribersData.map(subscriber => {
+      const subscriberSubscriptions = subscriptionsData.filter(
+        sub => sub.subscriberId === subscriber.id
+      );
+
+      const totalDue = subscriberSubscriptions.reduce(
+        (sum, sub) => sum + (sub.accountPrice || 0), 
+        0
+      );
+      
+      const totalPaid = subscriberSubscriptions.reduce(
+        (sum, sub) => sum + (sub.paidPrice || 0), 
+        0
+      );
+
+      const outstandingBalance = Math.max(0, totalDue - totalPaid);
+      
+      const activeSubscriptions = subscriberSubscriptions.filter(
+        sub => sub.status === 'active'
+      ).length;
+
+      // Calculate payment score
+      const paidCount = subscriberSubscriptions.filter(sub => sub.paymentStatus === 'paid').length;
+      const paymentRate = subscriberSubscriptions.length > 0 ? 
+        (paidCount / subscriberSubscriptions.length) * 100 : 0;
+      
+      const amountRatio = totalDue > 0 ? (totalPaid / totalDue) : 0;
+      const paymentScore = Math.min(100, Math.round((amountRatio * 70) + (paymentRate * 0.3)));
+
+      return {
+        ...subscriber,
+        totalDue,
+        totalPaid,
+        outstandingBalance,
+        subscriptionCount: subscriberSubscriptions.length,
+        activeSubscriptions,
+        paymentScore
+      };
+    });
+
+    setSubscribers(subscribersWithStats);
     notify.success('Subscriber updated successfully');
   };
 
@@ -170,7 +179,7 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
       if (!subscriber) return;
       
       // Get subscriber's subscriptions
-      const subscriptionHistory = await getSubscriptionsBySubscriberId(subscriberId);
+      const subscriptionHistory = await getSubscriptionsBySubscriberId(subscriberId) as Subscription[];
       
       if (!Array.isArray(subscriptionHistory) || subscriptionHistory.length === 0) {
         setSubscriberAnalysis("This subscriber has no subscription history yet.");
@@ -270,7 +279,7 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
   };
 
   const sortedSubscribers = useMemo(() => {
-    return [...subscribersWithScores].sort((a, b) => {
+    return [...subscribers].sort((a, b) => {
       let comparison = 0;
       
       switch (sortField) {
@@ -289,7 +298,7 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
       
       return sortDirection === 'asc' ? comparison : -comparison;
     });
-  }, [subscribersWithScores, sortField, sortDirection]);
+  }, [subscribers, sortField, sortDirection]);
 
   const filteredSubscribers = useMemo(() => {
     if (scoreFilter === 'all') return sortedSubscribers;
@@ -302,15 +311,15 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
   }, [sortedSubscribers, scoreFilter]);
 
   const paymentStats = useMemo(() => {
-    const totalSubscribers = subscribersWithScores.length;
-    const excellentPayers = subscribersWithScores.filter(s => s.paymentScore >= 90).length;
-    const goodPayers = subscribersWithScores.filter(s => s.paymentScore >= 70 && s.paymentScore < 90).length;
-    const averagePayers = subscribersWithScores.filter(s => s.paymentScore >= 50 && s.paymentScore < 70).length;
-    const poorPayers = subscribersWithScores.filter(s => s.paymentScore >= 30 && s.paymentScore < 50).length;
-    const veryPoorPayers = subscribersWithScores.filter(s => s.paymentScore < 30).length;
+    const totalSubscribers = subscribers.length;
+    const excellentPayers = subscribers.filter(s => s.paymentScore >= 90).length;
+    const goodPayers = subscribers.filter(s => s.paymentScore >= 70 && s.paymentScore < 90).length;
+    const averagePayers = subscribers.filter(s => s.paymentScore >= 50 && s.paymentScore < 70).length;
+    const poorPayers = subscribers.filter(s => s.paymentScore >= 30 && s.paymentScore < 50).length;
+    const veryPoorPayers = subscribers.filter(s => s.paymentScore < 30).length;
     
-    const totalDue = subscribersWithScores.reduce((sum, s) => sum + s.totalDue, 0);
-    const totalPaid = subscribersWithScores.reduce((sum, s) => sum + s.totalPaid, 0);
+    const totalDue = subscribers.reduce((sum, s) => sum + s.totalDue, 0);
+    const totalPaid = subscribers.reduce((sum, s) => sum + s.totalPaid, 0);
     const totalUnpaid = totalDue - totalPaid;
     
     return {
@@ -325,7 +334,7 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
       totalUnpaid,
       paymentRate: totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0
     };
-  }, [subscribersWithScores]);
+  }, [subscribers]);
 
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
@@ -353,9 +362,52 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
           await deleteSubscriber(subscriberId);
         }
         
-        // Refresh the list
-        const data = await getSubscribers();
-        setSubscribers(data);
+        // Refresh the list with updated stats
+        const subscribersData = await getSubscribers();
+        const subscriptionsData = await getSubscriptions();
+        
+        // Calculate stats for remaining subscribers
+        const subscribersWithStats = subscribersData.map(subscriber => {
+          const subscriberSubscriptions = subscriptionsData.filter(
+            sub => sub.subscriberId === subscriber.id
+          );
+
+          const totalDue = subscriberSubscriptions.reduce(
+            (sum, sub) => sum + (sub.accountPrice || 0), 
+            0
+          );
+          
+          const totalPaid = subscriberSubscriptions.reduce(
+            (sum, sub) => sum + (sub.paidPrice || 0), 
+            0
+          );
+
+          const outstandingBalance = Math.max(0, totalDue - totalPaid);
+          
+          const activeSubscriptions = subscriberSubscriptions.filter(
+            sub => sub.status === 'active'
+          ).length;
+
+          // Calculate payment score
+          const paidCount = subscriberSubscriptions.filter(sub => sub.paymentStatus === 'paid').length;
+          const paymentRate = subscriberSubscriptions.length > 0 ? 
+            (paidCount / subscriberSubscriptions.length) * 100 : 0;
+          
+          const amountRatio = totalDue > 0 ? (totalPaid / totalDue) : 0;
+          const paymentScore = Math.min(100, Math.round((amountRatio * 70) + (paymentRate * 0.3)));
+
+          return {
+            ...subscriber,
+            totalDue,
+            totalPaid,
+            outstandingBalance,
+            subscriptionCount: subscriberSubscriptions.length,
+            activeSubscriptions,
+            paymentScore
+          };
+        });
+
+        setSubscribers(subscribersWithStats);
         setSelectedSubscribers([]);
         notify.success(`Successfully deleted ${selectedSubscribers.length} subscriber(s)`);
       } catch (error) {
@@ -471,13 +523,16 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
                   Contact
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Active Subscriptions
+                  Total Due
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Payment Score
+                  Total Paid
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Total Payments
+                  Outstanding
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  Active Subs
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                   Actions
@@ -507,21 +562,19 @@ export default function SubscriberList({ refresh, searchTerm = '', onStatsUpdate
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
                     {subscriber.contact}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                    {subscriber.activeSubscriptions || 0}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                    PKR {subscriber.totalDue.toLocaleString()}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                    PKR {subscriber.totalPaid.toLocaleString()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="text-sm font-medium text-gray-900 dark:text-gray-100 mr-2">
-                        {subscriber.paymentScore || 0}
-                      </div>
-                      <span className={`px-2 py-1 text-xs rounded-full ${getScoreColor(subscriber.paymentScore || 0)}`}>
-                        {getScoreLabel(subscriber.paymentScore || 0)}
-                      </span>
-                    </div>
+                    <span className={`text-sm ${subscriber.outstandingBalance > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
+                      PKR {subscriber.outstandingBalance.toLocaleString()}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                    PKR {subscriber.totalPayments?.toLocaleString() || '0'}
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                    {subscriber.activeSubscriptions} / {subscriber.subscriptionCount}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                     <Link href={`/subscribers/${subscriber.id}`} className="text-blue-600 dark:text-blue-400 hover:text-blue-900 dark:hover:text-blue-300 mr-3">

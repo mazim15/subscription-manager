@@ -6,6 +6,16 @@ import { Account, Subscriber, Slot } from '@/types';
 import { generateText } from '@/lib/gemini';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
 
+interface SubscriptionHistoryItem {
+  startDate: any;
+  endDate: any;
+  paymentDueDate: any;
+  accountPrice: any;
+  paidPrice: any;
+  id: string;
+  paymentStatus?: 'paid' | 'unpaid' | 'free';
+}
+
 interface RenewSubscriptionFormProps {
   subscription: ExtendedSubscription;
   onRenew: (startDate: Date, endDate: Date, accountId: string, subscriberId: string, slotId: string) => void;
@@ -96,7 +106,11 @@ export default function RenewSubscriptionForm({ subscription, onRenew, onCancel 
 
         // Fetch payment history
         if (selectedSubscriber) {
-          const subscriptionHistory = await getSubscriptionsBySubscriberId(selectedSubscriber);
+          const rawSubscriptionHistory = await getSubscriptionsBySubscriberId(selectedSubscriber);
+          const subscriptionHistory = rawSubscriptionHistory.map(sub => ({
+            ...sub,
+            paymentStatus: sub.paidPrice > 0 ? 'paid' : 'unpaid'
+          })) as SubscriptionHistoryItem[];
           
           if (Array.isArray(subscriptionHistory)) {
             // Calculate remaining payment
@@ -161,9 +175,13 @@ export default function RenewSubscriptionForm({ subscription, onRenew, onCancel 
       
       // Get subscriber's subscription history
       const subscriptionHistory = await getSubscriptionsBySubscriberId(selectedSubscriber);
+      const processedHistory = subscriptionHistory.map(sub => ({
+        ...sub,
+        paymentStatus: sub.paidPrice > 0 ? 'paid' : 'unpaid'
+      })) as SubscriptionHistoryItem[];
       
       // Make sure we have valid data
-      if (!Array.isArray(subscriptionHistory)) {
+      if (!Array.isArray(processedHistory)) {
         throw new Error("Failed to retrieve subscription history");
       }
       
@@ -172,7 +190,7 @@ export default function RenewSubscriptionForm({ subscription, onRenew, onCancel 
       let totalPaid = 0;
       let unpaidCount = 0;
       
-      subscriptionHistory.forEach(sub => {
+      processedHistory.forEach(sub => {
         const price = sub.paidPrice || 0;
         totalDue += price;
         
@@ -191,9 +209,9 @@ export default function RenewSubscriptionForm({ subscription, onRenew, onCancel 
         totalPaid: totalPaid,
         unpaidAmount: totalDue - totalPaid,
         unpaidSubscriptions: unpaidCount,
-        renewalCount: subscriptionHistory.length,
+        renewalCount: processedHistory.length,
         paymentReliability: totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0,
-        subscriptionHistory: subscriptionHistory.map((sub: any) => ({
+        subscriptionHistory: processedHistory.map((sub: any) => ({
           startDate: new Date(sub.startDate).toLocaleDateString(),
           endDate: new Date(sub.endDate).toLocaleDateString(),
           price: sub.paidPrice || 0,

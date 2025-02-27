@@ -17,6 +17,14 @@ interface FormDataType {
   accountPassword: string;
   availableSlots: number[];
   totalSlots: number;
+  accountPrice: string;
+  paymentStatus: 'paid' | 'unpaid' | 'free';
+}
+
+interface Slot {
+  id: string;
+  isOccupied: boolean;
+  pin: string;
 }
 
 interface BatchEntryFormProps {
@@ -33,6 +41,8 @@ interface BatchEntryFormProps {
     accountPassword: string;
     availableSlots: number[];
     totalSlots: number;
+    accountPrice: string;
+    paymentStatus: 'paid' | 'unpaid' | 'free';
   };
   setFormData: (data: FormDataType) => void;
   accountExists?: boolean;
@@ -107,6 +117,10 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
         contact: formData.contact
       });
 
+      if (!subscriberId) {
+        throw new Error('Failed to create subscriber');
+      }
+
       if (!accountExists) {
         // For new accounts, use slot 1
         assignedSlotNumber = 1;
@@ -127,13 +141,13 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
         accountId = account.id;
 
         // Find first available slot
-        const availableSlotIndex = account.slots.findIndex(slot => !slot.isOccupied);
+        const availableSlotIndex = account.slots.findIndex((slot: Slot) => !slot.isOccupied);
         if (availableSlotIndex === -1) {
           throw new Error('No available slots in this account. Please choose another account.');
         }
         assignedSlotNumber = availableSlotIndex + 1;
 
-        const updatedSlots = account.slots.map((slot, index) => ({
+        const updatedSlots = account.slots.map((slot: Slot, index: number) => ({
           ...slot,
           isOccupied: index === availableSlotIndex ? true : slot.isOccupied,
           pin: index === availableSlotIndex ? formData.pin : slot.pin
@@ -154,8 +168,9 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
         startDate: new Date(formData.startDate),
         endDate: new Date(formData.endDate),
         paidPrice: parseFloat(formData.paidPrice),
+        accountPrice: parseFloat(formData.accountPrice || '0'),
         status: 'active',
-        paymentStatus: 'unpaid'
+        paymentStatus: formData.paymentStatus as 'paid' | 'unpaid' | 'free'
       });
 
       setCreatedSubscriptionId(subscriptionId);
@@ -332,6 +347,20 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
               />
             </div>
           )}
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              Account Price
+            </label>
+            <input
+              type="number"
+              name="accountPrice"
+              value={formData.accountPrice}
+              onChange={handleChange}
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white"
+              placeholder="Enter account price"
+            />
+          </div>
         </div>
         
         <div className="flex justify-end">

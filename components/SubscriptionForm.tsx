@@ -4,6 +4,8 @@ import { createSubscription, getAccounts, getSubscribers, getSubscriptionsBySubs
 import { Account, Subscriber } from '@/types';
 import { generateText } from '@/lib/gemini';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
+import { Timestamp } from 'firebase/firestore';
+import { Subscription } from '@/types';
 
 const SUBSCRIPTION_DAYS = 27;
 
@@ -14,6 +16,7 @@ export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void
   const [selectedSlot, setSelectedSlot] = useState('');
   const [selectedSubscriber, setSelectedSubscriber] = useState('');
   const [paidPrice, setPaidPrice] = useState('');
+  const [accountPrice, setAccountPrice] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [paymentDueDate, setPaymentDueDate] = useState('');
@@ -23,7 +26,7 @@ export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void
   const [recommendationLoading, setRecommendationLoading] = useState(false);
   const [remainingPayment, setRemainingPayment] = useState(0);
   const [hasOutstandingBalance, setHasOutstandingBalance] = useState(false);
-  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid' | 'free'>('unpaid');
+  const [paymentStatus, setPaymentStatus] = useState<'paid' | 'unpaid' | 'overdue' | 'pending' | 'partial' | 'free'>('unpaid');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -55,10 +58,9 @@ export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void
       }
       
       try {
-        const subscriptionHistory = await getSubscriptionsBySubscriberId(selectedSubscriber);
+        const subscriptionHistory = await getSubscriptionsBySubscriberId(selectedSubscriber) as Subscription[];
         
         if (Array.isArray(subscriptionHistory) && subscriptionHistory.length > 0) {
-          // Calculate remaining payment
           let totalDue = 0;
           let totalPaid = 0;
           
@@ -90,9 +92,10 @@ export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void
     e.preventDefault();
 
     const parsedPrice = parseFloat(paidPrice);
+    const parsedAccountPrice = parseFloat(accountPrice);
 
-    if (isNaN(parsedPrice)) {
-      alert('Please enter a valid number for the paid price.');
+    if (isNaN(parsedPrice) || isNaN(parsedAccountPrice)) {
+      alert('Please enter valid numbers for the prices.');
       return;
     }
 
@@ -106,8 +109,9 @@ export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void
           endDate: new Date(endDate),
           paymentDueDate: new Date(paymentDueDate),
           paidPrice: parsedPrice,
+          accountPrice: parsedAccountPrice,
           status: 'active',
-          paymentStatus: paymentStatus,
+          paymentStatus: paymentStatus as Subscription['paymentStatus'],
         }
       );
 
@@ -129,7 +133,7 @@ export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void
       if (!subscriber || !account) return;
       
       // Get subscriber's payment history
-      const subscriptionHistory = await getSubscriptionsBySubscriberId(selectedSubscriber);
+      const subscriptionHistory = await getSubscriptionsBySubscriberId(selectedSubscriber) as Subscription[];
       
       // Calculate payment metrics if there's history
       let paymentReliability = 100; // Default to 100% if no history
@@ -265,6 +269,19 @@ export default function SubscriptionForm({ onSuccess }: { onSuccess?: () => void
             </button>
           </div>
         )}
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Account Price</label>
+          <input
+            type="number"
+            value={accountPrice}
+            onChange={(e) => setAccountPrice(e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white transition-colors duration-200"
+            required
+            step="0.01"
+            min="0"
+          />
+        </div>
 
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Paid Price</label>

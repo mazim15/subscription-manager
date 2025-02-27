@@ -123,6 +123,7 @@ export const getSubscriber = async (subscriberId: string): Promise<Subscriber | 
                                 startDate: subscriptionData.startDate.toMillis(),
                                 endDate: subscriptionData.endDate.toMillis(),
                                 paidPrice: subscriptionData.paidPrice,
+                                accountPrice: subscriptionData.accountPrice,
                                 status: subscriptionData.status,
                                 paymentStatus: subscriptionData.paymentStatus,
                                 createdAt: subscriptionData.createdAt.toMillis(),

@@ -21,6 +21,8 @@ export interface Subscriber {
     id: string;
     name: string;
     contact: string;
+    email?: string;
+    address?: string;
     subscriptions?: Subscription[];
     createdAt: Timestamp;
     updatedAt: Timestamp;
@@ -34,6 +36,7 @@ export interface Subscription {
     startDate: Timestamp;
     endDate: Timestamp;
     paidPrice: number;
+    accountPrice: number;
     paymentDueDate: Timestamp;
     status: 'active' | 'expired' | 'pending-renewal' | 'suspended';
     paymentStatus: 'paid' | 'unpaid' | 'overdue' | 'pending' | 'partial' | 'free';
@@ -75,4 +78,13 @@ export interface Payments {
     subscriberId: string;
     date: string;
     amount: number;
+}
+
+export interface SubscriberWithStats extends Subscriber {
+  totalDue: number;
+  totalPaid: number;
+  outstandingBalance: number;
+  subscriptionCount: number;
+  activeSubscriptions: number;
+  paymentScore: number;
 }

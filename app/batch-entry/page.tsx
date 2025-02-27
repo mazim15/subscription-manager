@@ -19,6 +19,7 @@ interface FormDataType {
   availableSlots: number[];
   totalSlots: number;
   paymentStatus: 'paid' | 'unpaid' | 'free';
+  accountPrice: string;
 }
 
 export default function BatchEntryPage() {
@@ -35,7 +36,8 @@ export default function BatchEntryPage() {
     accountPassword: '',
     availableSlots: [],
     totalSlots: 5,
-    paymentStatus: 'unpaid'
+    paymentStatus: 'unpaid',
+    accountPrice: ''
   });
   const [accountExists, setAccountExists] = useState(false);
   const [entries, setEntries] = useState<Array<FormDataType>>([]);
@@ -86,6 +88,7 @@ export default function BatchEntryPage() {
       availableSlots: [],
       accountEmail: prev.accountEmail || '',
       accountPassword: prev.accountPassword || '',
+      accountPrice: prev.accountPrice || '',
       totalSlots: 5,
       paymentStatus: 'unpaid'
     }));
@@ -98,19 +101,17 @@ export default function BatchEntryPage() {
       const processedData = rows.map(row => {
         const columns = row.split('\t');
         
-        // Handle cases where price might be empty
-        const price = columns[3]?.trim() ? parseFloat(columns[3]) : 0;
-        
         return {
           name: columns[0]?.trim() || '',
           contact: columns[1]?.trim() || '',
           slotNumber: columns[2]?.trim() || '',
-          paidPrice: price.toString(),
+          paidPrice: columns[3]?.trim() || '0',
           accountEmail: columns[4]?.trim() || '',
           pin: columns[5]?.trim() || '',
           startDate: columns[6]?.trim() || '',
           endDate: columns[7]?.trim() || '',
-          paymentStatus: 'unpaid'
+          paymentStatus: 'unpaid' as const,
+          accountPrice: '0' // Default to '0' as string
         };
       });
 
@@ -122,7 +123,8 @@ export default function BatchEntryPage() {
           availableSlots: prev.availableSlots,
           totalSlots: prev.totalSlots,
           accountPassword: prev.accountPassword,
-          paymentStatus: processedData[0].paymentStatus
+          accountPrice: prev.accountPrice || '0',
+          paymentStatus: 'unpaid'
         }));
         notify.success('Data processed successfully');
       } else {

@@ -3,26 +3,53 @@
 import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { getSubscriber, getSubscriptionsBySubscriberId, deleteSubscriber, getAccounts } from '@/lib/db-operations';
-import { Subscriber, Account } from '@/types';
+import { Subscriber, Account, Subscription } from '@/types';
 import Link from 'next/link';
 import { generateText } from '@/lib/gemini';
 import MarkdownRenderer from '@/components/MarkdownRenderer';
+
+interface PaymentStats {
+  totalDue: number;
+  totalPaid: number;
+  outstandingBalance: number;
+  paymentRate: number;
+}
+
+interface EnhancedSubscription extends Subscription {
+  accountEmail?: string;
+}
+
+const timestampToDate = (timestamp: any) => {
+  if (!timestamp) return new Date();
+  // Handle Firestore Timestamp
+  if (timestamp.toDate) {
+    return timestamp.toDate();
+  }
+  // Handle regular Date object or string
+  return new Date(timestamp);
+};
 
 export default function SubscriberDetailsPage() {
   const params = useParams();
   const router = useRouter();
   const [subscriber, setSubscriber] = useState<Subscriber | null>(null);
-  const [subscriptions, setSubscriptions] = useState<any[]>([]);
+  const [subscriptions, setSubscriptions] = useState<EnhancedSubscription[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [aiInsight, setAiInsight] = useState<string>('');
   const [insightLoading, setInsightLoading] = useState(false);
+  const [paymentStats, setPaymentStats] = useState<PaymentStats>({
+    totalDue: 0,
+    totalPaid: 0,
+    outstandingBalance: 0,
+    paymentRate: 0
+  });
   
   useEffect(() => {
     const fetchData = async () => {
       try {
-        if (!params.id) {
+        if (!params?.id) {
           setError('Subscriber ID is missing');
           setLoading(false);
           return;
@@ -32,7 +59,7 @@ export default function SubscriberDetailsPage() {
         
         const [subscriberData, subscriptionsData, accountsData] = await Promise.all([
           getSubscriber(subscriberId),
-          getSubscriptionsBySubscriberId(subscriberId),
+          getSubscriptionsBySubscriberId(subscriberId) as Promise<Subscription[]>,
           getAccounts()
         ]);
         
@@ -45,8 +72,8 @@ export default function SubscriberDetailsPage() {
         setSubscriber(subscriberData);
         setAccounts(accountsData);
         
-        // Enhance subscriptions with account information
-        const enhancedSubscriptions = subscriptionsData.map(subscription => {
+        // Update the enhancedSubscriptions mapping
+        const enhancedSubscriptions = subscriptionsData.map((subscription: Subscription) => {
           const account = accountsData.find(acc => acc.id === subscription.accountId);
           return {
             ...subscription,
@@ -55,6 +82,10 @@ export default function SubscriberDetailsPage() {
         });
         
         setSubscriptions(enhancedSubscriptions);
+        
+        // Calculate payment statistics
+        const paymentStats = calculatePaymentStats(enhancedSubscriptions);
+        setPaymentStats(paymentStats);
         
         // Generate AI insight
         generateSubscriberInsight(subscriberData, enhancedSubscriptions);
@@ -67,7 +98,7 @@ export default function SubscriberDetailsPage() {
     };
     
     fetchData();
-  }, [params.id]);
+  }, [params?.id]);
   
   const generateSubscriberInsight = async (subscriber: Subscriber, subscriptions: any[]) => {
     try {
@@ -122,6 +153,29 @@ export default function SubscriberDetailsPage() {
     }
   };
   
+  // Update the payment statistics calculation
+  const calculatePaymentStats = (subscriptions: any[]) => {
+    let totalDue = 0;
+    let totalPaid = 0;
+    
+    subscriptions.forEach(sub => {
+      // Total due is the sum of all account prices
+      totalDue += sub.accountPrice || 0;
+      // Total paid is the sum of all paid prices
+      totalPaid += sub.paidPrice || 0;
+    });
+    
+    const outstandingBalance = Math.max(0, totalDue - totalPaid);
+    const paymentRate = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
+    
+    return {
+      totalDue,
+      totalPaid,
+      outstandingBalance,
+      paymentRate
+    };
+  };
+  
   if (loading) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -141,12 +195,6 @@ export default function SubscriberDetailsPage() {
       </div>
     );
   }
-  
-  // Calculate payment statistics
-  const totalDue = subscriptions.reduce((sum, sub) => sum + (sub.paidPrice || 0), 0);
-  const totalPaid = subscriptions.reduce((sum, sub) => 
-    (sub.paymentStatus === 'paid' ? sum + (sub.paidPrice || 0) : sum), 0);
-  const paymentRate = totalDue > 0 ? Math.round((totalPaid / totalDue) * 100) : 0;
   
   return (
     <div>
@@ -197,32 +245,38 @@ export default function SubscriberDetailsPage() {
           <h2 className="text-xl font-semibold mb-4 heading">Payment Statistics</h2>
           <div className="mb-4">
             <p className="text-sm text-gray-500 dark:text-gray-400">Payment Rate</p>
-            <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{paymentRate}%</p>
+            <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">{paymentStats.paymentRate}%</p>
             <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-2">
               <div 
                 className="bg-green-600 h-2.5 rounded-full" 
-                style={{ width: `${paymentRate}%` }}
+                style={{ width: `${paymentStats.paymentRate}%` }}
               ></div>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400">Total Paid</p>
-              <p className="text-lg font-medium text-green-600 dark:text-green-400">PKR {totalPaid.toLocaleString()}</p>
+              <p className="text-lg font-medium text-green-600 dark:text-green-400">
+                PKR {paymentStats.totalPaid.toLocaleString()}
+              </p>
             </div>
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400">Total Due</p>
-              <p className="text-lg font-medium text-gray-900 dark:text-gray-100">PKR {totalDue.toLocaleString()}</p>
+              <p className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                PKR {paymentStats.totalDue.toLocaleString()}
+              </p>
             </div>
             <div>
-              <p className="text-sm text-gray-500 dark:text-gray-400">Active Subscriptions</p>
-              <p className="text-lg font-medium text-blue-600 dark:text-blue-400">
-                {subscriptions.filter(sub => sub.status === 'active').length}
+              <p className="text-sm text-gray-500 dark:text-gray-400">Outstanding Balance</p>
+              <p className="text-lg font-medium text-red-600 dark:text-red-400">
+                PKR {paymentStats.outstandingBalance.toLocaleString()}
               </p>
             </div>
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400">Total Subscriptions</p>
-              <p className="text-lg font-medium text-gray-900 dark:text-gray-100">{subscriptions.length}</p>
+              <p className="text-lg font-medium text-gray-900 dark:text-gray-100">
+                {subscriptions.length}
+              </p>
             </div>
           </div>
         </div>
@@ -268,13 +322,13 @@ export default function SubscriberDetailsPage() {
                   Account
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Price
+                  Account Price
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
+                  Paid Price
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
                   Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Payment
                 </th>
               </tr>
             </thead>
@@ -283,13 +337,16 @@ export default function SubscriberDetailsPage() {
                 subscriptions.map((subscription) => (
                   <tr key={subscription.id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                      {new Date(subscription.startDate).toLocaleDateString()}
+                      {timestampToDate(subscription.startDate).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
-                      {new Date(subscription.endDate).toLocaleDateString()}
+                      {timestampToDate(subscription.endDate).toLocaleDateString()}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                       {subscription.accountEmail || 'Unknown'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                      PKR {subscription.accountPrice?.toLocaleString() || '0'}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                       PKR {subscription.paidPrice?.toLocaleString() || '0'}
@@ -305,23 +362,12 @@ export default function SubscriberDetailsPage() {
                         {subscription.status?.charAt(0).toUpperCase() + subscription.status?.slice(1) || 'Unknown'}
                       </span>
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2 py-1 text-xs rounded-full ${
-                        subscription.paymentStatus === 'paid' 
-                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
-                          : subscription.paymentStatus === 'unpaid'
-                            ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
-                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
-                      }`}>
-                        {subscription.paymentStatus?.charAt(0).toUpperCase() + subscription.paymentStatus?.slice(1) || 'Unknown'}
-                      </span>
-                    </td>
                   </tr>
                 ))
               ) : (
                 <tr>
                   <td colSpan={6} className="px-6 py-4 text-center text-gray-500 dark:text-gray-400">
-                    No subscription history found
+                    No subscriptions found
                   </td>
                 </tr>
               )}

@@ -1,63 +1,123 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { getPaymentReminders, suspendSubscription, getAccounts, getSubscribers, getSubscriptionsBySubscriberId } from '@/lib/db-operations';
+import { getPaymentReminders, suspendSubscription, getAccounts, getSubscribers, getSubscriptionsBySubscriberId, getSubscriber } from '@/lib/db-operations';
 import { Timestamp } from 'firebase/firestore';
 import { generatePaymentReminder, generateText } from '@/lib/gemini';
 import { notify } from '@/lib/notifications';
+import { Subscription, Subscriber } from '@/types';
 
-export default function PaymentReminders() {
-  const [reminders, setReminders] = useState<any[]>([]);
+interface PaymentRemindersProps {
+  onPaymentSuccess: () => void;
+  onPaymentError: (error: string) => void;
+}
+
+interface PaymentReminderItem {
+  id: string;
+  subscriberId: string;
+  subscriberName?: string;
+  subscriberContact?: string;
+  amount: number;
+  accountPrice: number;
+  paidPrice: number;
+  paymentDueDate: Timestamp;
+  paymentStatus: string;
+  reminderType: 'upcoming' | 'overdue';
+  daysOverdue?: number;
+  outstanding?: number;
+}
+
+// Add a new interface for grouped reminders
+interface GroupedReminders {
+  subscriberId: string;
+  subscriberName: string;
+  subscriberContact: string;
+  totalOutstanding: number;
+  totalDue: number;
+  totalPaid: number;
+  reminders: PaymentReminderItem[];
+}
+
+export default function PaymentReminders({ onPaymentSuccess, onPaymentError }: PaymentRemindersProps) {
+  const [reminders, setReminders] = useState<PaymentReminderItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<any[]>([]);
   const [subscribers, setSubscribers] = useState<any[]>([]);
   const [reminderText, setReminderText] = useState<string>('');
-  const [selectedReminder, setSelectedReminder] = useState<any | null>(null);
+  const [selectedReminder, setSelectedReminder] = useState<PaymentReminderItem | null>(null);
   const [showWhatsAppTemplate, setShowWhatsAppTemplate] = useState(false);
   const [reminderType, setReminderType] = useState('all');
+  const [groupedReminders, setGroupedReminders] = useState<GroupedReminders[]>([]);
 
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchReminders = async () => {
       try {
-        const [remindersData, accountsData, subscribersData] = await Promise.all([
-          getPaymentReminders(),
-          getAccounts(),
-          getSubscribers()
-        ]);
-
-        console.log("Reminders data:", remindersData);
+        setLoading(true);
+        const remindersData = await getPaymentReminders() as unknown as Partial<Subscription>[];
         
-        // Enhance reminder data with related information
-        const enhancedReminders = remindersData.map(reminder => {
-          const account = accountsData.find(acc => acc.id === reminder.accountId);
-          const subscriber = subscribersData.find(s => s.id === reminder.subscriberId);
+        // Enhance reminders with subscriber info and payment calculations
+        const enhancedReminders = await Promise.all(remindersData.map(async (reminder) => {
+          const subscriber = await getSubscriber(reminder.subscriberId!);
+          const outstanding = calculateOutstanding(reminder.accountPrice || 0, reminder.paidPrice || 0);
           
           return {
             ...reminder,
-            accountEmail: account?.email || 'Unknown Account',
-            subscriberName: subscriber?.name || 'Unknown Subscriber',
-            subscriberContact: subscriber?.contact || 'No contact info',
-          };
-        });
+            subscriberName: subscriber?.name || 'Unknown',
+            subscriberContact: subscriber?.contact || 'No contact',
+            accountPrice: reminder.accountPrice || 0,
+            paidPrice: reminder.paidPrice || 0,
+            outstanding,
+            amount: reminder.accountPrice || 0,
+            paymentStatus: reminder.paymentStatus || 'unknown',
+            reminderType: reminder.paymentStatus === 'overdue' ? 'overdue' : 'upcoming'
+          } as PaymentReminderItem;
+        }));
 
+        // Group reminders by subscriber
+        const grouped = enhancedReminders.reduce((acc: GroupedReminders[], reminder) => {
+          const existingGroup = acc.find(g => g.subscriberId === reminder.subscriberId);
+          
+          if (existingGroup) {
+            existingGroup.reminders.push(reminder);
+            existingGroup.totalOutstanding += reminder.outstanding || 0;
+            existingGroup.totalDue += reminder.accountPrice;
+            existingGroup.totalPaid += reminder.paidPrice;
+          } else {
+            acc.push({
+              subscriberId: reminder.subscriberId,
+              subscriberName: reminder.subscriberName || 'Unknown',
+              subscriberContact: reminder.subscriberContact || 'No contact',
+              totalOutstanding: reminder.outstanding || 0,
+              totalDue: reminder.accountPrice,
+              totalPaid: reminder.paidPrice,
+              reminders: [reminder]
+            });
+          }
+          
+          return acc;
+        }, []);
+
+        setGroupedReminders(grouped);
         setReminders(enhancedReminders);
-        setAccounts(accountsData);
-        setSubscribers(subscribersData);
       } catch (error) {
-        console.error('Error fetching payment reminders:', error);
+        console.error('Error fetching reminders:', error);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchData();
+    fetchReminders();
   }, []);
 
-  const formatDate = (date: Date | Timestamp) => {
+  const formatDate = (date: Date | Timestamp | undefined) => {
+    if (!date) return 'N/A';
     if (date instanceof Timestamp) {
       return date.toDate().toLocaleDateString();
     }
-    return date.toLocaleDateString();
+    if (date instanceof Date) {
+      return date.toLocaleDateString();
+    }
+    return 'Invalid Date';
   };
 
   const handleSendReminder = async (subscriberId: string, subscriptionId: string) => {
@@ -73,82 +133,58 @@ export default function PaymentReminders() {
       try {
         await suspendSubscription(subscriptionId);
         // Refresh data
-        const remindersData = await getPaymentReminders();
-        setReminders(remindersData);
+        const remindersData = await getPaymentReminders() as unknown as Partial<Subscription>[];
+        const enhancedReminders = await Promise.all(remindersData.map(async (reminder) => {
+          const subscriber = await getSubscriber(reminder.subscriberId!);
+          const outstanding = calculateOutstanding(reminder.accountPrice || 0, reminder.paidPrice || 0);
+          
+          return {
+            ...reminder,
+            subscriberName: subscriber?.name || 'Unknown',
+            subscriberContact: subscriber?.contact || 'No contact',
+            accountPrice: reminder.accountPrice || 0,
+            paidPrice: reminder.paidPrice || 0,
+            outstanding,
+            amount: reminder.accountPrice || 0,
+            paymentStatus: reminder.paymentStatus || 'unknown',
+            reminderType: reminder.paymentStatus === 'overdue' ? 'overdue' : 'upcoming'
+          } as PaymentReminderItem;
+        }));
+        
+        setReminders(enhancedReminders);
       } catch (error) {
         console.error('Error suspending subscription:', error);
       }
     }
   };
 
-  const generatePaymentSummary = async (reminder: any) => {
+  const generatePaymentSummary = async (reminder: PaymentReminderItem) => {
     try {
-      // Get subscriber's payment history
-      const subscriptionHistory = await getSubscriptionsBySubscriberId(reminder.subscriberId);
+      // Get all subscriptions for this subscriber
+      const subscriptions = await getSubscriptionsBySubscriberId(reminder.subscriberId);
       
-      if (!Array.isArray(subscriptionHistory)) {
-        throw new Error("Failed to retrieve subscription history");
-      }
-      
-      // Calculate totals
-      let totalDue = 0;
-      let totalPaid = 0;
-      
-      subscriptionHistory.forEach(sub => {
-        const price = sub.paidPrice || 0;
-        totalDue += price;
-        
-        if (sub.paymentStatus === 'paid') {
-          totalPaid += price;
-        }
-      });
-      
-      const remainingPayment = Math.max(0, totalDue - totalPaid);
-      
-      // Generate AI summary
-      const prompt = `
-        Generate a payment summary for this subscriber:
-        
-        Subscriber: ${reminder.subscriberName}
-        Total paid to date: PKR ${totalPaid}
-        Total due: PKR ${totalDue}
-        Remaining to be paid: PKR ${remainingPayment}
-        Current overdue amount: PKR ${reminder.paidPrice}
-        Days overdue: ${reminder.daysOverdue || 0}
-        
-        Important context:
-        - We do NOT offer free trials
-        - All subscriptions require payment
-        - This is for a streaming service subscription
-        - The subscriber has not paid for their subscription yet
-        
-        Please provide:
-        1. A brief summary of their payment status
-        2. A polite but firm payment request message
-        3. A suggested payment plan if the amount is significant
-        
-        Keep it concise (under 100 words).
-      `;
-      
-      const result = await generateText(prompt);
+      // Calculate totals across all subscriptions
+      const summary = subscriptions.reduce((acc, sub) => {
+        return {
+          totalDue: acc.totalDue + (sub.accountPrice || 0),
+          totalPaid: acc.totalPaid + (sub.paidPrice || 0),
+        };
+      }, { totalDue: 0, totalPaid: 0 });
+
+      const totalOutstanding = Math.max(0, summary.totalDue - summary.totalPaid);
+
       return {
-        summary: result,
-        totalPaid,
-        totalDue,
-        remainingPayment
+        totalDue: summary.totalDue,
+        totalPaid: summary.totalPaid,
+        remainingPayment: totalOutstanding
       };
     } catch (error) {
       console.error('Error generating payment summary:', error);
-      return {
-        summary: 'Unable to generate payment summary at this time.',
-        totalPaid: 0,
-        totalDue: 0,
-        remainingPayment: 0
-      };
+      throw error;
     }
   };
 
-  const handleOpenWhatsApp = async (reminder: any) => {
+  const handleOpenWhatsApp = async (reminder: PaymentReminderItem) => {
     setSelectedReminder(reminder);
     setShowWhatsAppTemplate(true);
     
@@ -180,11 +216,11 @@ export default function PaymentReminders() {
   };
   
   const handleSendWhatsApp = () => {
-    if (!selectedReminder) return;
+    if (!selectedReminder?.subscriberContact) return;
     
     // Format phone number (remove spaces, add country code if needed)
     let phoneNumber = selectedReminder.subscriberContact;
-    if (!phoneNumber.startsWith('+')) {
+    if (phoneNumber && !phoneNumber.startsWith('+')) {
       phoneNumber = '+92' + phoneNumber.replace(/^0/, ''); // Add Pakistan country code
     }
     phoneNumber = phoneNumber.replace(/\s+/g, '');
@@ -205,27 +241,36 @@ export default function PaymentReminders() {
 
   const generateAIReminderText = async (subscriber: any) => {
     try {
-      // Calculate days overdue if not provided
-      let daysOverdue = subscriber.daysOverdue;
-      if (daysOverdue === undefined) {
-        const dueDate = new Date(subscriber.dueDate);
-        const today = new Date();
-        daysOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-      }
+      // Get all subscriptions for this subscriber
+      const subscriptions = await getSubscriptionsBySubscriberId(subscriber.subscriberId);
       
-      // Generate AI reminder with payment context
+      // Calculate totals across all subscriptions
+      const totals = subscriptions.reduce((acc, sub) => ({
+        totalDue: acc.totalDue + (sub.accountPrice || 0),
+        totalPaid: acc.totalPaid + (sub.paidPrice || 0),
+        subscriptionCount: acc.subscriptionCount + 1
+      }), { totalDue: 0, totalPaid: 0, subscriptionCount: 0 });
+
+      const totalOutstanding = Math.max(0, totals.totalDue - totals.totalPaid);
+
+      // Generate AI reminder with aggregated payment context
       const prompt = `
-        Generate a polite but firm payment reminder message for a streaming service subscription.
+        Generate a polite but firm payment reminder message for streaming service subscriptions.
         
         Details:
         - Subscriber name: ${subscriber.subscriberName}
-        - Days overdue: ${daysOverdue}
-        - Current amount due: PKR ${subscriber.amount}
-        - Total paid to date: PKR ${subscriber.totalPaid || 0}
-        - Total remaining balance: PKR ${subscriber.remainingPayment || subscriber.amount}
+        - Number of subscriptions: ${totals.subscriptionCount}
+        - Total Account Price: PKR ${totals.totalDue}
+        - Total Amount Paid: PKR ${totals.totalPaid}
+        - Total Outstanding: PKR ${totalOutstanding}
         
-        The tone should be professional but friendly. Include a clear call to action.
-        Mention the total remaining balance if it's different from the current amount due.
+        Important context:
+        - This is for multiple streaming service subscriptions
+        - The payment is overdue
+        - Be clear about the total outstanding amount
+        - Include the total amount that needs to be paid
+        
+        The tone should be professional but firm. Include a clear call to action for payment.
         Keep it concise (under 100 words).
       `;
       
@@ -233,11 +278,20 @@ export default function PaymentReminders() {
       setReminderText(reminderMessage);
     } catch (error) {
       console.error('Error generating AI reminder:', error);
-      // Fallback to a default message
+      // Fallback to a default message with correct values
       setReminderText(
-        `Dear ${subscriber.subscriberName},\n\nThis is a reminder that your payment of PKR ${subscriber.amount} for your streaming subscription is overdue. Please make the payment at your earliest convenience.\n\nThank you,\nStreaming Manager`
+        `Dear ${subscriber.subscriberName},\n\n` +
+        `This is a reminder regarding your streaming service subscriptions. ` +
+        `Your total outstanding balance is PKR ${subscriber.totalOutstanding} ` +
+        `(Total due: PKR ${subscriber.totalDue}, Total paid: PKR ${subscriber.totalPaid}). ` +
+        `Please make the payment at your earliest convenience.\n\n` +
+        `Thank you,\nStreaming Manager`
       );
     }
+  };
+
+  const calculateOutstanding = (accountPrice: number, paidPrice: number) => {
+    return Math.max(0, accountPrice - paidPrice);
   };
 
   if (loading) {
@@ -288,106 +342,113 @@ export default function PaymentReminders() {
           </button>
         </div>
         
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead className="bg-gray-50 dark:bg-gray-700">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Subscriber
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Account
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Amount
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Due Date
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
-              {reminders.map((reminder) => (
-                <tr key={reminder.id} className={reminder.reminderType === 'overdue' ? 'bg-red-50 dark:bg-red-900/20' : ''}>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                      {reminder.subscriberName}
-                    </div>
-                    <div className="text-sm text-gray-500 dark:text-gray-400">
-                      {reminder.subscriberContact}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900 dark:text-gray-100">
-                      {reminder.accountEmail}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900 dark:text-gray-100">
-                      PKR {reminder.paidPrice.toFixed(2)}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="text-sm text-gray-900 dark:text-gray-100">
-                      {formatDate(reminder.paymentDueDate)}
-                    </div>
-                    {reminder.reminderType === 'overdue' && (
-                      <div className="text-sm text-red-600 dark:text-red-400">
-                        {reminder.daysOverdue} days overdue
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      reminder.reminderType === 'overdue' 
-                        ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' 
-                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+        <div className="space-y-4">
+          {groupedReminders.map((group) => (
+            <div key={group.subscriberId} className="border dark:border-gray-700 rounded-lg">
+              <div className="p-4 flex items-center justify-between bg-gray-50 dark:bg-gray-800 rounded-t-lg">
+                <div className="flex items-center space-x-4">
+                  <div>
+                    <h3 className="text-base font-medium text-gray-900 dark:text-gray-100">
+                      {group.subscriberName}
+                    </h3>
+                    <p className="text-sm text-gray-500">{group.subscriberContact}</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-4">
+                  <div className="text-right">
+                    <p className="text-xs text-gray-500">Total Outstanding</p>
+                    <p className={`text-base font-semibold ${
+                      group.totalOutstanding > 0 ? 'text-red-600' : 'text-green-600'
                     }`}>
-                      {reminder.reminderType === 'overdue' ? 'Overdue' : 'Due Soon'}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                      PKR {group.totalOutstanding.toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex space-x-2">
                     <button
-                      onClick={() => handleSendReminder(reminder.subscriberId, reminder.id)}
-                      className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-900 dark:hover:text-indigo-300 mr-3"
+                      onClick={() => handleOpenWhatsApp(group.reminders[0])}
+                      className="inline-flex items-center px-3 py-1.5 bg-green-600 text-white text-sm rounded-md hover:bg-green-700"
                     >
-                      Send Reminder
-                    </button>
-                    {reminder.reminderType === 'overdue' && reminder.daysOverdue > 7 && (
-                      <button
-                        onClick={() => handleSuspendSubscription(reminder.id)}
-                        className="text-green-600 dark:text-green-400 hover:text-green-900 dark:hover:text-green-300"
-                      >
-                        Suspend
-                      </button>
-                    )}
-                    <button
-                      onClick={() => handleOpenWhatsApp(reminder)}
-                      className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm flex items-center"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-1" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                      <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24">
+                        <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347"/>
                       </svg>
                       WhatsApp
                     </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
+                  <thead className="bg-gray-50 dark:bg-gray-700">
+                    <tr>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Due Date</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Account Price</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Paid</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Outstanding</th>
+                      <th className="px-4 py-2 text-left text-xs font-medium text-gray-500">Status</th>
+                      <th className="px-4 py-2"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
+                    {group.reminders.map((reminder) => (
+                      <tr 
+                        key={reminder.id}
+                        className={reminder.reminderType === 'overdue' ? 'bg-red-50/50 dark:bg-red-900/20' : ''}
+                      >
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <div className="text-sm">{formatDate(reminder.paymentDueDate)}</div>
+                          {reminder.daysOverdue && reminder.daysOverdue > 0 && (
+                            <div className="text-xs text-red-600">
+                              {reminder.daysOverdue}d overdue
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm">
+                          PKR {reminder.accountPrice.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-sm">
+                          PKR {reminder.paidPrice.toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className={`text-sm ${
+                            (reminder.outstanding ?? 0) > 0 ? 'text-red-600' : 'text-green-600'
+                          }`}>
+                            PKR {(reminder.outstanding ?? 0).toLocaleString()}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className={`px-2 py-0.5 text-xs rounded-full ${
+                            reminder.reminderType === 'overdue' 
+                              ? 'bg-red-100 text-red-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                          }`}>
+                            {reminder.reminderType === 'overdue' ? 'Overdue' : 'Due Soon'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-right">
+                          {reminder.reminderType === 'overdue' && (reminder.daysOverdue ?? 0) > 7 && (
+                            <button
+                              onClick={() => handleSuspendSubscription(reminder.id)}
+                              className="text-xs text-red-600 hover:text-red-800"
+                            >
+                              Suspend
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+
+          {groupedReminders.length === 0 && (
+            <div className="text-center py-8 text-gray-500">
+              No payment reminders found.
+            </div>
+          )}
         </div>
-        
-        {reminders.length === 0 && (
-          <div className="text-center py-8 text-gray-500 dark:text-gray-400">
-            No payment reminders for the selected filter.
-          </div>
-        )}
       </div>
       
       {/* WhatsApp Template Modal */}
