@@ -1,37 +1,100 @@
 'use client';
 import { useState, useEffect } from 'react';
-import { getAccounts, deleteAccount, getAccountUsage } from '@/lib/db-operations';
-import { Account } from '@/types';
+import { getAccounts, deleteAccount, getAccountUsage, getSubscribers } from '@/lib/db-operations';
+import { getAccountTypes } from '@/lib/db-operations/accountTypes';
+import { Account, AccountType } from '@/types';
 import AccountEditForm from './AccountEditForm';
 import NetflixLoginComponent from './NetflixLogin';
 import { notify } from '@/lib/notifications';
+import { Timestamp } from 'firebase/firestore';
 
 interface AccountListProps {
-  refresh?: boolean;
+  refresh: boolean;
   searchTerm?: string;
-  onStatsUpdate?: (stats: {
-    total: number;
-    active: number;
-    available: number;
-    utilization: number;
-  }) => void;
+  accountTypeFilter?: string;
+  onStatsUpdate?: (stats: { total: number; active: number; available: number; utilization: number }) => void;
 }
 
-export default function AccountList({ refresh, searchTerm = '', onStatsUpdate }: AccountListProps) {
+export default function AccountList({ refresh, searchTerm = '', accountTypeFilter = '', onStatsUpdate }: AccountListProps) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [accountUsages, setAccountUsages] = useState<{[key: string]: any}>({});
+  const [accountTypes, setAccountTypes] = useState<{[key: string]: AccountType}>({});
+
+  useEffect(() => {
+    const fetchAccountTypes = async () => {
+      try {
+        const types = await getAccountTypes();
+        const typesMap: {[key: string]: AccountType} = {};
+        types.forEach(type => {
+          typesMap[type.id] = {
+            ...type,
+            createdAt: type.createdAt || Timestamp.now(),
+            updatedAt: type.updatedAt || Timestamp.now()
+          };
+        });
+        setAccountTypes(typesMap);
+      } catch (error) {
+        console.error('Error fetching account types:', error);
+      }
+    };
+
+    fetchAccountTypes();
+  }, []);
 
   useEffect(() => {
     const fetchAccounts = async () => {
       try {
-        const data = await getAccounts();
-        setAccounts(data);
+        setLoading(true);
+        const accountsData = await getAccounts();
+        const subscribersData = await getSubscribers();
+        
+        // Filter by account type if specified
+        const filteredData = accountTypeFilter 
+          ? accountsData.filter(account => account.accountTypeId === accountTypeFilter)
+          : accountsData;
+        
+        // Filter by search term
+        const searchFilteredData = searchTerm
+          ? filteredData.filter(account => 
+              account.email.toLowerCase().includes(searchTerm.toLowerCase()))
+          : filteredData;
+        
+        // Enhance account data with subscriber names
+        const enhancedAccounts = searchFilteredData.map(account => {
+          const enhancedSlots = account.slots.map(slot => {
+            // Check for current subscriber first
+            if (slot.currentSubscriber) {
+              const subscriber = subscribersData.find(sub => sub.id === slot.currentSubscriber);
+              return {
+                ...slot,
+                subscriberName: subscriber?.name || 'Unknown Subscriber'
+              };
+            } 
+            // If no current subscriber but has lastSubscriber, use that
+            else if (slot.lastSubscriber) {
+              const subscriber = subscribersData.find(sub => sub.id === slot.lastSubscriber);
+              return {
+                ...slot,
+                subscriberName: subscriber ? `${subscriber.name} (Expired)` : 'Unknown Subscriber (Expired)'
+              };
+            }
+            return slot;
+          });
+          
+          return {
+            ...account,
+            slots: enhancedSlots
+          };
+        });
+        
+        setAccounts(enhancedAccounts);
+        
         // Fetch account usages
         const usages: {[key: string]: any} = {};
-        for (const account of data) {
+        for (const account of enhancedAccounts) {
           const usage = await getAccountUsage(account.id);
           usages[account.id] = usage;
         }
@@ -39,9 +102,9 @@ export default function AccountList({ refresh, searchTerm = '', onStatsUpdate }:
         
         // Calculate account statistics
         if (onStatsUpdate) {
-          const totalAccounts = data.length;
-          const totalSlots = data.reduce((acc, account) => acc + account.slots.length, 0);
-          const activeSlots = data.reduce(
+          const totalAccounts = enhancedAccounts.length;
+          const totalSlots = enhancedAccounts.reduce((acc, account) => acc + account.slots.length, 0);
+          const activeSlots = enhancedAccounts.reduce(
             (acc, account) => acc + account.slots.filter(slot => slot.isOccupied).length, 0
           );
           const availableSlots = totalSlots - activeSlots;
@@ -62,7 +125,7 @@ export default function AccountList({ refresh, searchTerm = '', onStatsUpdate }:
     };
 
     fetchAccounts();
-  }, [refresh, onStatsUpdate]);
+  }, [refresh, searchTerm, accountTypeFilter, onStatsUpdate]);
 
   const handleCopyEmail = (email: string) => {
     navigator.clipboard.writeText(email);
@@ -102,18 +165,6 @@ export default function AccountList({ refresh, searchTerm = '', onStatsUpdate }:
     setAccounts(data);
   };
 
-  // Filter accounts based on search term
-  const filteredAccounts = accounts.filter(account => {
-    if (!searchTerm) return true;
-    
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      account.email.toLowerCase().includes(searchLower) ||
-      // Add any other fields you want to search by
-      account.slots.some(slot => slot.pin?.toLowerCase().includes(searchLower))
-    );
-  });
-
   if (loading) {
     return <div>Loading accounts...</div>;
   }
@@ -129,7 +180,7 @@ export default function AccountList({ refresh, searchTerm = '', onStatsUpdate }:
         />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredAccounts.map((account) => (
+          {accounts.map((account) => (
             <div key={account.id} className="card p-6 hover:scale-[1.02] transition-all duration-200 border border-gray-200 dark:border-gray-700 relative overflow-hidden">
               {/* Account Header with Gradient Accent */}
               <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 to-purple-500"></div>
@@ -178,19 +229,42 @@ export default function AccountList({ refresh, searchTerm = '', onStatsUpdate }:
                     </button>
                   </div>
                 </div>
+
+                {/* Add account type display */}
+                {account.accountTypeId && accountTypes[account.accountTypeId] && (
+                  <div className="mt-2">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                      Type: {accountTypes[account.accountTypeId].name}
+                    </span>
+                  </div>
+                )}
               </div>
               
               <div className="space-y-3 mb-4">
                 <p className="text-sm font-medium text-gray-500 dark:text-gray-400">Slots:</p>
                 {account.slots.map((slot, index) => (
-                  <div key={slot.id} className="flex justify-between items-center border-b border-gray-200 dark:border-gray-700 pb-2">
+                  <div key={slot.id} className="flex justify-between items-center border-b border-gray-200 dark:border-gray-700 pb-2 mb-2">
                     <div>
-                      <p className="font-medium">Slot {index + 1}</p>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">PIN: {slot.pin}</p>
+                      <div className={`px-3 py-1 rounded-md text-sm ${
+                        slot.isOccupied 
+                          ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200' 
+                          : slot.subscriberName 
+                            ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200'
+                            : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-300'
+                      }`}>
+                        {slot.isOccupied 
+                          ? (slot.subscriberName 
+                              ? `${slot.subscriberName}` 
+                              : `Slot ${index + 1}`)
+                          : slot.subscriberName
+                            ? `${slot.subscriberName}`
+                            : `Slot ${index + 1} (Available)`}
+                      </div>
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">PIN: {slot.pin}</p>
                     </div>
                     <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        slot.isOccupied
+                      className={`px-2 py-1 rounded-full text-xs font-medium ${
+                        slot.isOccupied 
                           ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
                           : 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200'
                       }`}
@@ -225,11 +299,9 @@ export default function AccountList({ refresh, searchTerm = '', onStatsUpdate }:
             </div>
           ))}
           
-          {filteredAccounts.length === 0 && (
+          {accounts.length === 0 && (
             <div className="col-span-3 text-center py-8 text-gray-500 dark:text-gray-400">
-              {accounts.length === 0 ? 
-                "No accounts found. Add your first account to get started." : 
-                "No accounts match your search criteria."}
+              No accounts found. Create one to get started.
             </div>
           )}
         </div>

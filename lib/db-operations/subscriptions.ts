@@ -79,6 +79,9 @@ export const createSubscription = async (subscription: SubscriptionInput) => {
         return slot;
       });
 
+      console.log('Updating slot:', subscription.slotId, 'for account:', subscription.accountId);
+      console.log('Current slots:', account.slots);
+
       await updateDoc(accountRef, { slots: updatedSlots });
     }
 
@@ -245,57 +248,52 @@ export const deleteSubscription = async (subscriptionId: string) => {
 };
 
 export const cancelSubscription = async (subscriptionId: string) => {
-  if (!auth?.currentUser) {
-    throw new Error('User not authenticated');
-  }
-
-  const subscriptionRef = doc(db, 'subscriptions', subscriptionId);
-  await updateDoc(subscriptionRef, {
-    status: 'cancelled',
-    updatedAt: Timestamp.now(),
-  });
-
-  // Update account slot
-  const subscriptionDoc = await getDoc(subscriptionRef);
-  const subscriptionData = subscriptionDoc.data();
-
-  if (subscriptionData) {
-    // Update account slot
-    const accountRef = doc(db, 'accounts', subscriptionData.accountId);
+  try {
+    const subscriptionRef = doc(db, 'subscriptions', subscriptionId);
+    const subscriptionDoc = await getDoc(subscriptionRef);
+    
+    if (!subscriptionDoc.exists()) {
+      throw new Error('Subscription not found');
+    }
+    
+    const subscriptionData = subscriptionDoc.data();
+    const { accountId, slotId, subscriberId } = subscriptionData;
+    
+    // Update subscription status
+    await updateDoc(subscriptionRef, {
+      status: 'cancelled',
+      updatedAt: Timestamp.now()
+    });
+    
+    // Update account slot - keep track of last subscriber
+    const accountRef = doc(db, 'accounts', accountId);
     const accountDoc = await getDoc(accountRef);
-    const account = accountDoc.data();
-
-    if (account) {
-      const updatedSlots = account.slots.map((slot: Slot) =>
-        slot.id === subscriptionData.slotId
-          ? {
+    
+    if (accountDoc.exists()) {
+      const accountData = accountDoc.data();
+      const updatedSlots = accountData.slots.map((slot: any) => {
+        if (slot.id === slotId) {
+          return {
             ...slot,
             isOccupied: false,
             currentSubscriber: null,
-            expiryDate: null,
-          }
-          : slot
-      );
-
-      await updateDoc(accountRef, { slots: updatedSlots });
-    }
-
-    // Update subscriber's subscriptions array
-    const subscriberRef = doc(db, 'subscribers', subscriptionData.subscriberId);
-    const subscriberDoc = await getDoc(subscriberRef);
-    const subscriberData = subscriberDoc.data();
-
-    if (subscriberData && subscriberData.subscriptions) {
-      // Update the status of this subscription in the subscriber's array
-      const updatedSubscriptions = subscriberData.subscriptions.map((sub: any) => {
-        if (sub.id === subscriptionId) {
-          return { ...sub, status: 'cancelled' };
+            lastSubscriber: subscriberId, // Store the last subscriber ID
+            expiryDate: null
+          };
         }
-        return sub;
+        return slot;
       });
       
-      await updateDoc(subscriberRef, { subscriptions: updatedSubscriptions });
+      await updateDoc(accountRef, { 
+        slots: updatedSlots,
+        updatedAt: Timestamp.now()
+      });
     }
+    
+    return true;
+  } catch (error) {
+    console.error('Error cancelling subscription:', error);
+    throw error;
   }
 };
 
@@ -429,5 +427,55 @@ export const suspendSubscription = async (subscriptionId: string) => {
       
       await updateDoc(subscriberRef, { subscriptions: updatedSubscriptions });
     }
+  }
+};
+
+export const handleSubscriptionExpiry = async (subscriptionId: string) => {
+  try {
+    const subscriptionRef = doc(db, 'subscriptions', subscriptionId);
+    const subscriptionDoc = await getDoc(subscriptionRef);
+    
+    if (!subscriptionDoc.exists()) {
+      throw new Error('Subscription not found');
+    }
+    
+    const subscriptionData = subscriptionDoc.data();
+    const { accountId, slotId, subscriberId } = subscriptionData;
+    
+    // Update subscription status
+    await updateDoc(subscriptionRef, {
+      status: 'expired',
+      updatedAt: Timestamp.now()
+    });
+    
+    // Update account slot - keep track of last subscriber
+    const accountRef = doc(db, 'accounts', accountId);
+    const accountDoc = await getDoc(accountRef);
+    
+    if (accountDoc.exists()) {
+      const accountData = accountDoc.data();
+      const updatedSlots = accountData.slots.map((slot: any) => {
+        if (slot.id === slotId) {
+          return {
+            ...slot,
+            isOccupied: false,
+            currentSubscriber: null,
+            lastSubscriber: subscriberId, // Store the last subscriber ID
+            expiryDate: null
+          };
+        }
+        return slot;
+      });
+      
+      await updateDoc(accountRef, { 
+        slots: updatedSlots,
+        updatedAt: Timestamp.now()
+      });
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error handling subscription expiry:', error);
+    throw error;
   }
 };

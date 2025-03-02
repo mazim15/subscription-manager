@@ -5,6 +5,7 @@ export interface Account {
     email: string;
     password: string;
     slots: Slot[];
+    accountTypeId?: string | null;
     createdAt: Timestamp;
     updatedAt: Timestamp;
   }
@@ -13,8 +14,11 @@ export interface Account {
     id: string;
     pin: string;
     isOccupied: boolean;
-    currentSubscriber?: string;
-    expiryDate?: Date;
+    currentSubscriber?: string | null;
+    lastSubscriber?: string | null;
+    expiryDate?: Timestamp | null;
+    isSuspended?: boolean;
+    suspensionReason?: string;
   }
   
 export interface Subscriber {
@@ -87,4 +91,12 @@ export interface SubscriberWithStats extends Subscriber {
   subscriptionCount: number;
   activeSubscriptions: number;
   paymentScore: number;
+}
+
+export interface AccountType {
+  id: string;
+  name: string;
+  slots: number;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
 }

@@ -22,6 +22,7 @@ export const addAccount = async (account: Omit<Account, 'id' | 'createdAt' | 'up
     email: account.email,
     password: account.password,
     slots: account.slots,
+    accountTypeId: account.accountTypeId || null,
     createdAt: Timestamp.now(),
     updatedAt: Timestamp.now(),
   });
@@ -37,6 +38,7 @@ export const getAccounts = async () => {
       email: data.email,
       password: data.password,
       slots: data.slots || [],
+      accountTypeId: data.accountTypeId || null,
       createdAt: data.createdAt,
       updatedAt: data.updatedAt,
     } as Account

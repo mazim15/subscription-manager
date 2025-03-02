@@ -34,6 +34,7 @@ export async function POST(request: Request) {
       email: data.email,
       password: data.password,
       slots: data.slots,
+      accountTypeId: data.accountTypeId || null,
       createdAt: now,
       updatedAt: now
     });
@@ -43,6 +44,7 @@ export async function POST(request: Request) {
       email: data.email,
       password: data.password,
       slots: data.slots,
+      accountTypeId: data.accountTypeId || null,
       createdAt: now.toDate(),
       updatedAt: now.toDate()
     });

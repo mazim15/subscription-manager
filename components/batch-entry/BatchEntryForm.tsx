@@ -1,6 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { createSubscription, getAccount, updateAccount, addAccount, addSubscriber } from '@/lib/db-operations';
+import { getAccountTypes, AccountType, getAccountType } from '@/lib/db-operations/accountTypes';
 import BatchEntryPreview from './BatchEntryPreview';
 import BatchEntrySuccess from './BatchEntrySuccess';
 import { motion } from 'framer-motion';
@@ -19,6 +20,7 @@ interface FormDataType {
   totalSlots: number;
   accountPrice: string;
   paymentStatus: 'paid' | 'unpaid' | 'free';
+  accountTypeId?: string;
 }
 
 interface Slot {
@@ -43,6 +45,7 @@ interface BatchEntryFormProps {
     totalSlots: number;
     accountPrice: string;
     paymentStatus: 'paid' | 'unpaid' | 'free';
+    accountTypeId?: string;
   };
   setFormData: (data: FormDataType) => void;
   accountExists?: boolean;
@@ -54,6 +57,20 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
   const [showPreview, setShowPreview] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [createdSubscriptionId, setCreatedSubscriptionId] = useState('');
+  const [accountTypes, setAccountTypes] = useState<AccountType[]>([]);
+
+  useEffect(() => {
+    const fetchAccountTypes = async () => {
+      try {
+        const types = await getAccountTypes();
+        setAccountTypes(types);
+      } catch (error) {
+        console.error('Error fetching account types:', error);
+      }
+    };
+    
+    fetchAccountTypes();
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -122,9 +139,15 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
       }
 
       if (!accountExists) {
-        // For new accounts, use slot 1
+        // Set the assigned slot number to 1 for new accounts
         assignedSlotNumber = 1;
-        const slots = Array.from({ length: 5 }, (_, index) => ({
+        
+        // Get the account type to determine the number of slots
+        const accountType = await getAccountType(formData.accountTypeId);
+        const numberOfSlots = accountType ? accountType.slots : 5; // Default to 5 if not found
+        
+        // Create slots based on the account type's slot count
+        const slots = Array.from({ length: numberOfSlots }, (_, index) => ({
           id: `slot-${index + 1}`,
           isOccupied: index + 1 === assignedSlotNumber,
           pin: index + 1 === assignedSlotNumber ? formData.pin : ''
@@ -133,7 +156,8 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
         accountId = await addAccount({
           email: formData.accountEmail,
           password: formData.accountPassword,
-          slots: slots
+          slots: slots,
+          accountTypeId: formData.accountTypeId
         });
       } else {
         const account = await getAccount(formData.accountEmail);
@@ -156,9 +180,14 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
         await updateAccount(accountId, {
           email: formData.accountEmail,
           password: account.password,
-          slots: updatedSlots
+          slots: updatedSlots,
+          accountTypeId: formData.accountTypeId
         });
       }
+
+      // Determine payment status based on paid price
+      const paidPrice = parseFloat(formData.paidPrice);
+      const paymentStatus = paidPrice > 0 ? 'paid' : 'unpaid';
 
       // Create subscription with both accountId and subscriberId
       const subscriptionId = await createSubscription({
@@ -167,10 +196,11 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
         slotId: `slot-${assignedSlotNumber}`,
         startDate: new Date(formData.startDate),
         endDate: new Date(formData.endDate),
-        paidPrice: parseFloat(formData.paidPrice),
+        paidPrice: paidPrice,
         accountPrice: parseFloat(formData.accountPrice || '0'),
         status: 'active',
-        paymentStatus: formData.paymentStatus as 'paid' | 'unpaid' | 'free'
+        paymentStatus: paymentStatus,
+        paymentDueDate: new Date(formData.startDate)
       });
 
       setCreatedSubscriptionId(subscriptionId);
@@ -361,6 +391,28 @@ export default function BatchEntryForm({ onSuccess, formData, setFormData, accou
               placeholder="Enter account price"
             />
           </div>
+          
+          {!accountExists && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Account Type
+                </label>
+                <select
+                  value={formData.accountTypeId || ''}
+                  onChange={(e) => setFormData({...formData, accountTypeId: e.target.value})}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-slate-700 text-gray-900 dark:text-white transition-colors duration-200"
+                >
+                  <option value="">Select Account Type</option>
+                  {accountTypes.map(type => (
+                    <option key={type.id} value={type.id}>
+                      {type.name} ({type.slots} slots)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          )}
         </div>
         
         <div className="flex justify-end">
