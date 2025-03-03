@@ -18,6 +18,7 @@
     "crypto-browserify": "^3.12.1",
     "date-fns": "^4.1.0",
     "firebase": "^11.3.1",
+    "firebase-admin": "^13.1.0",
     "framer-motion": "^12.4.7",
     "https-browserify": "^1.0.0",
     "mongodb": "^6.13.1",
