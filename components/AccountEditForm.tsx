@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { getAccount, updateAccount } from '@/lib/db-operations';
+import { notify } from '@/lib/notifications';
 
 interface AccountEditFormProps {
   account: {
@@ -40,31 +42,31 @@ export default function AccountEditForm({ account, onSuccess, onCancel }: Accoun
     ];
 
     try {
-      const requestBody = JSON.stringify({
+      const currentAccount = await getAccount(account.email);
+      
+      const updatedSlots = slots.map((newSlot, index) => {
+        const currentSlot = currentAccount?.slots[index];
+        return {
+          ...newSlot,
+          currentSubscriber: currentSlot?.currentSubscriber || null,
+          lastSubscriber: currentSlot?.lastSubscriber || null,
+          isOccupied: currentSlot?.isOccupied || false,
+          expiryDate: currentSlot?.expiryDate || null
+        };
+      });
+
+      await updateAccount(account.id, {
         email: formData.email,
         password: formData.password,
-        slots: slots,
+        slots: updatedSlots,
+        accountTypeId: formData.accountTypeId
       });
 
-      console.log('Request Body:', requestBody);
-
-      const response = await fetch(`/api/accounts/${account.id}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: requestBody,
-      });
-
-      const data = await response.json().then(data => data);
-
-      if (!response.ok) {
-        throw new Error(data.error || 'Failed to update account');
-      }
-
+      notify.success('Account updated successfully');
       onSuccess();
     } catch (error) {
-      setError(error instanceof Error ? error.message : 'An error occurred');
+      console.error('Error updating account:', error);
+      notify.error('Failed to update account');
     } finally {
       setLoading(false);
     }

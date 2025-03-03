@@ -9,6 +9,7 @@ import {
   deleteDoc,
   Timestamp,
   updateDoc,
+  getDoc,
 } from 'firebase/firestore';
 import { auth } from '../firebase';
 import { Account } from '../../types';
@@ -64,4 +65,47 @@ export const deleteAccount = async (accountId: string) => {
 
   const accountRef = doc(db, 'accounts', accountId);
   await deleteDoc(accountRef);
+};
+
+export const updateAccount = async (accountId: string, accountData: Partial<Account>) => {
+  if (!auth?.currentUser) {
+    throw new Error('User not authenticated');
+  }
+
+  try {
+    const accountRef = doc(db, 'accounts', accountId);
+    const currentAccountDoc = await getDoc(accountRef);
+    
+    if (!currentAccountDoc.exists()) {
+      throw new Error('Account not found');
+    }
+
+    const currentAccount = currentAccountDoc.data();
+
+    // Ensure slots maintain their subscriber information
+    const updatedSlots = accountData.slots?.map((newSlot, index) => {
+      const currentSlot = currentAccount.slots[index];
+      return {
+        ...newSlot,
+        // Preserve all subscriber-related fields
+        currentSubscriber: currentSlot?.currentSubscriber || null,
+        lastSubscriber: currentSlot?.lastSubscriber || null,
+        isOccupied: currentSlot?.isOccupied || false,
+        expiryDate: currentSlot?.expiryDate || null,
+        isSuspended: currentSlot?.isSuspended || false,
+        suspensionReason: currentSlot?.suspensionReason || null
+      };
+    });
+
+    await updateDoc(accountRef, {
+      ...accountData,
+      slots: updatedSlots || currentAccount.slots,
+      updatedAt: Timestamp.now()
+    });
+
+    return true;
+  } catch (error) {
+    console.error('Error updating account:', error);
+    throw error;
+  }
 };
